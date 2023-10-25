@@ -105,6 +105,35 @@ check_and_log_vpn_config_file() {
     fi
 }
 
+configure_vpn() {
+    local VPN_TYPE=$1
+    local VPN_CONFIG=$2
+    local VPN_USERNAME=$3
+    local VPN_PASSWORD=$4
+
+    # Read username and password env vars and put them in credentials.conf, then add ovpn config for credentials file
+    if [[ "${VPN_TYPE}" == "openvpn" ]]; then
+        if [[ ! -z "${VPN_USERNAME}" ]] && [[ ! -z "${VPN_PASSWORD}" ]]; then
+            if [[ ! -e /config/openvpn/credentials.conf ]]; then
+                touch /config/openvpn/credentials.conf
+            fi
+
+            echo "${VPN_USERNAME}" > /config/openvpn/credentials.conf
+            echo "${VPN_PASSWORD}" >> /config/openvpn/credentials.conf
+
+            # Replace line with one that points to credentials.conf
+            auth_cred_exist=$(cat "${VPN_CONFIG}" | grep -m 1 'auth-user-pass')
+            if [[ ! -z "${auth_cred_exist}" ]]; then
+                # Get line number of auth-user-pass
+                LINE_NUM=$(grep -Fn -m 1 'auth-user-pass' "${VPN_CONFIG}" | cut -d: -f 1)
+                sed -i "${LINE_NUM}s/.*/auth-user-pass credentials.conf/" "${VPN_CONFIG}"
+            else
+                sed -i "1s/.*/auth-user-pass credentials.conf/" "${VPN_CONFIG}"
+            fi
+        fi
+    fi
+}
+
 parse_config() {
     local vpn_type="${1}"
     local vpn_config="${2}"
