@@ -169,6 +169,28 @@ print_info() {
     fi
 }
 
+configure_remote() {
+    local vpn_type="${1}"
+	local vpn_remote_line="${2}"
+    
+    if [[ "${vpn_type}" == "openvpn" ]]; then
+        echo "${vpn_remote_line}" | grep -P -o -m 1 '^[^\s\r\n]+' | sed -e 's~^[ \t]*~~;s~[ \t]*$~~'
+    else
+        echo "${vpn_remote_line}" | grep -P -o -m 1 '^[^:\r\n]+'
+    fi
+}
+
+configure_port() {
+    local vpn_type="${1}"
+	local vpn_remote_line="${2}"
+    
+    if [[ "${vpn_type}" == "openvpn" ]]; then
+        echo "${vpn_remote_line}" | grep -P -o -m 1 '(?<=\s)\d{2,5}(?=\s)?+' | sed -e 's~^[ \t]*~~;s~[ \t]*$~~'
+    else
+        echo "${vpn_remote_line}" | grep -P -o -m 1 '(?<=:)\d{2,5}(?=:)?+'
+    fi
+}
+
 configure_protocol() {
     local vpn_type="${1}"
     
@@ -273,10 +295,10 @@ if [[ $VPN_ENABLED == "1" || $VPN_ENABLED == "true" || $VPN_ENABLED == "yes" ]];
 
 	print_info "VPN remote line" "${vpn_remote_line}"
 
-	export VPN_REMOTE=$(get_value '^[^\s\r\n]+' "${vpn_remote_line}")
+	export VPN_REMOTE="$(configure_remote "${VPN_TYPE}" "${vpn_remote_line}")"
 	print_info "VPN_REMOTE" "${VPN_REMOTE}"
 
-	export VPN_PORT=$(get_value '(?<=\s)\d{2,5}(?=\s)?+' "${vpn_remote_line}")
+	export VPN_PORT="$(configure_port "${VPN_TYPE}" "${vpn_remote_line}")"
 	print_info "VPN_PORT" "${VPN_PORT}"
 
 	export VPN_PROTOCOL="$(configure_protocol "${VPN_TYPE}")"
