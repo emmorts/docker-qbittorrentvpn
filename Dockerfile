@@ -6,7 +6,7 @@ WORKDIR /opt
 RUN usermod -u 99 nobody
 
 # Make directories
-RUN mkdir -p /downloads /config/qBittorrent /etc/openvpn /etc/qbittorrent
+RUN mkdir -p /downloads /config/qBittorrent /etc/openvpn /etc/qbittorrent /etc/scripts
 
 # Install boost
 RUN apt update \
@@ -214,12 +214,14 @@ RUN sed -i /net\.ipv4\.conf\.all\.src_valid_mark/d `which wg-quick`
 
 VOLUME /config /downloads
 
+ADD scripts/ /etc/scripts/
 ADD openvpn/ /etc/openvpn/
 ADD qbittorrent/ /etc/qbittorrent/
 
-RUN chmod +x /etc/qbittorrent/*.sh /etc/qbittorrent/*.init /etc/openvpn/*.sh
+RUN chmod +x /etc/qbittorrent/*.sh /etc/qbittorrent/*.init /etc/openvpn/*.sh /etc/scripts/*.sh
 
 EXPOSE 8080
 EXPOSE 8999
 EXPOSE 8999/udp
-CMD ["/bin/bash", "/etc/openvpn/start.sh"]
+# CMD ["/bin/bash", "/etc/openvpn/start.sh"]
+CMD ["/bin/bash", "/etc/scripts/main.sh"]

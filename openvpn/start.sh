@@ -1,327 +1,393 @@
 #!/bin/bash
-# Forked from binhex's OpenVPN dockers
-set -e
 
-# function to handle exit
-exit_script() {
-    echo "[ERROR] $1" | ts '%Y-%m-%d %H:%M:%.S'
-    # Sleep so it won't 'spam restart'
-    sleep 10
-    exit 1
+set -o errexit
+set -o nounset
+set -o pipefail
+
+# Constants
+readonly LOG_DATE_FORMAT='%Y-%m-%d %H:%M:%.S'
+
+# Logging Functions
+log_error_and_exit() {
+  local -r message="$1"
+  echo "[ERROR] ${message}" | ts "${LOG_DATE_FORMAT}"
+  sleep 10
+  exit 1
 }
 
-# function to check for presence of network interface docker0
-check_network_dependencies() {
-  check_network=$(ifconfig | grep docker0 || true)
-# if network interface docker0 is present then we are running in host mode and thus must exit
-  if [[ ! -z "${check_network}" ]]; then
-    exit_script "Network type detected as 'Host', this will cause major issues, please stop the container and switch back to 'Bridge' mode"
+log_warning() {
+  local -r message="$1"
+  echo "[WARNING] ${message}" | ts "${LOG_DATE_FORMAT}"
+}
+
+log_info() {
+  local -r message="$1"
+  echo "[INFO] ${message}" | ts "${LOG_DATE_FORMAT}"
+}
+
+# ---
+
+# Ensure network dependencies are present
+ensure_network_deps() {
+  # Check if docker0 interface is present - indicating we're running in host mode.
+  local network_check
+  network_check=$(ifconfig | grep docker0 || true)
+
+  if [[ -n "${network_check}" ]]; then
+    log_error_and_exit "Detected network type 'Host'. This will cause major issues. Please switch back to 'Bridge' mode."
   fi
 }
 
-# function to chek if VPN is enabled
-check_vpn_enabled() {
-	export VPN_ENABLED=$(echo "${VPN_ENABLED,,}" | sed -e 's~^[ \t]*~~;s~[ \t]*$~~')
-	if [[ ! -z "${VPN_ENABLED}" ]]; then
-		echo "[INFO] VPN_ENABLED defined as '${VPN_ENABLED}'" | ts '%Y-%m-%d %H:%M:%.S'
-	else
-		echo "[WARNING] VPN_ENABLED not defined,(via -e VPN_ENABLED), defaulting to 'yes'" | ts '%Y-%m-%d %H:%M:%.S'
-		export VPN_ENABLED="yes"
-	fi
+# Set up the VPN_ENABLED environment variable
+configure_vpn_enabled() {
+  # convert VPN_ENABLED to lowercase and remove leading/trailing whitespace
+  export VPN_ENABLED=$(echo "${VPN_ENABLED,,}" | sed -e 's~^[ \t]*~~;s~[ \t]*$~~')
+
+  # If VPN_ENABLED environment variable is not set, default to "yes"
+  if [[ -z "${VPN_ENABLED}" ]]; then
+    log_warning "VPN_ENABLED not defined (via -e VPN_ENABLED). Defaulting to 'yes'."
+    export VPN_ENABLED="yes"
+  else
+    log_info "VPN_ENABLED set as '${VPN_ENABLED}'"
+  fi
 }
 
-# function to check if Linux Kernel's iptables is in legacy mode
-check_iptables_mode() {
+# Configure between legacy and nft version of iptables depending on the LEGACY_IPTABLES value
+configure_iptables_mode() {
   export LEGACY_IPTABLES=$(echo "${LEGACY_IPTABLES,,}")
-  echo "[INFO] LEGACY_IPTABLES is set to '${LEGACY_IPTABLES}'" | ts '%Y-%m-%d %H:%M:%.S'
-  if [[ $LEGACY_IPTABLES == "1" || $LEGACY_IPTABLES == "true" || $LEGACY_IPTABLES == "yes" ]]; then
-    echo "[INFO] Setting iptables to iptables (legacy)" | ts '%Y-%m-%d %H:%M:%.S'
+
+  log_info "LEGACY_IPTABLES is set to '${LEGACY_IPTABLES}'"
+
+  if [[ "${LEGACY_IPTABLES}" =~ ^(1|true|yes)$ ]]; then
+    log_info "Setting iptables to iptables (legacy)"
     update-alternatives --set iptables /usr/sbin/iptables-legacy
   else
-    echo "[INFO] Not making any changes to iptables version" | ts '%Y-%m-%d %H:%M:%.S'
+    log_info "Not making any changes to iptables version"
   fi
-  iptables_version=$(iptables -V)
-  echo "[INFO] The container is currently running ${iptables_version}."  | ts '%Y-%m-%d %H:%M:%.S'
+  
+  local -r iptables_version=$(iptables -V)
+  log_info "The container is currently running ${iptables_version}."
 }
 
-check_vpn_type() {
-    # Check if VPN_TYPE is set.
-    if [[ -z "${VPN_TYPE}" ]]; then
-        echo "[WARNING] VPN_TYPE not set, defaulting to OpenVPN." | ts '%Y-%m-%d %H:%M:%.S'
-        export VPN_TYPE="openvpn"
-    else
-        echo "[INFO] VPN_TYPE defined as '${VPN_TYPE}'" | ts '%Y-%m-%d %H:%M:%.S'
-    fi
+# Configure DNS name servers    
+configure_dns_servers() {
+  local -a name_server_list
+  IFS=',' read -ra name_server_list <<<"${NAME_SERVERS// /}"
 
-    if [[ "${VPN_TYPE}" != "openvpn" && "${VPN_TYPE}" != "wireguard" ]]; then
-        echo "[WARNING] VPN_TYPE not set, as 'wireguard' or 'openvpn', defaulting to OpenVPN." | ts '%Y-%m-%d %H:%M:%.S'
-        export VPN_TYPE="openvpn"
-    fi
+  if [[ -z "${name_server_list[*]}" ]]; then
+    log_error_and_exit "No name servers provided in NAME_SERVERS. Exiting..."
+  fi
+  
+  for name_server in "${name_server_list[@]}"; do
+    log_info "Adding ${name_server} to resolv.conf"
+    echo "nameserver ${name_server}" >>/etc/resolv.conf
+  done
 }
 
-create_and_set_permissions_for_config_dir() {
-    # Create the directory to store OpenVPN or WireGuard config files
-    mkdir -p /config/${VPN_TYPE}
-    # Set permmissions and owner for files in /config/openvpn or /config/wireguard directory
-    set +e
-    chown -R "${PUID}":"${PGID}" "/config/${VPN_TYPE}" &> /dev/null
-    exit_code_chown=$?
-    chmod -R 775 "/config/${VPN_TYPE}" &> /dev/null
-    exit_code_chmod=$?
-    set -e
-    if (( ${exit_code_chown} != 0 || ${exit_code_chmod} != 0 )); then
-        echo "[WARNING] Unable to chown/chmod /config/${VPN_TYPE}/, assuming SMB mountpoint" | ts '%Y-%m-%d %H:%M:%.S'
-    fi
+# Configure user permissions for the container
+configure_user_rights() {
+  if [[ -z "${PUID}" ]]; then
+    log_info "PUID not defined. Defaulting to root user"
+    export PUID="root"
+  fi
+
+  if [[ -z "${PGID}" ]]; then
+    log_info "PGID not defined. Defaulting to root group"
+    export PGID="root"
+  fi
+}
+
+setup_vpn_type() {
+  if [[ -z "${VPN_TYPE}" ]]; then
+    log_warning "VPN_TYPE not set, defaulting to OpenVPN."
+    VPN_TYPE="openvpn"
+  fi
+
+  VPN_TYPE=$(echo "${VPN_TYPE}" | tr '[:upper:]' '[:lower:]')
+
+  if [[ "${VPN_TYPE}" != "openvpn" && "${VPN_TYPE}" != "wireguard" ]]; then
+    log_error_and_exit "Invalid VPN_TYPE. It should be either 'wireguard' or 'openvpn'. Exiting..."
+  fi
+
+  log_info "VPN_TYPE defined as '${VPN_TYPE}'"
+  export VPN_TYPE
+}
+
+validate_vpn_type() {
+  local vpn_type=$1
+
+  if [[ "${vpn_type}" != "openvpn" && "${vpn_type}" != "wireguard" ]]; then
+    log_error_and_exit "${vpn_type} is not a valid VPN type. Please use either 'openvpn' or 'wireguard'."
+  fi
+}
+
+setup_config_directory() {
+  local -r config_dir="/config/${VPN_TYPE}"
+
+  # Create the directory to store OpenVPN or WireGuard config files
+  mkdir -p "${config_dir}"
+
+  # Set permissions and owner for files in /config/openvpn or /config/wireguard directory
+  if chown -R "${PUID}":"${PGID}" "${config_dir}" &>/dev/null; then
+    log_info "Changed ownership of ${config_dir} to ${PUID}:${PGID}"
+  else
+    log_warning "Failed to change the ownership of ${config_dir}. Assuming SMB mount point or lack of permissions."
+  fi
+
+  if chmod -R 775 "${config_dir}" &>/dev/null; then
+    log_info "Changed permissions of ${config_dir} to 775"
+  else
+    log_warning "Failed to change the permissions of ${config_dir}. Assuming SMB mount point or lack of permissions."
+  fi
 }
 
 search_for_vpn_config_files() {
-    # Wildcard search for openvpn config files (match on first result)
-    if [[ "${VPN_TYPE}" == "openvpn" ]]; then
-        export VPN_CONFIG=$(find /config/openvpn -maxdepth 1 -name "*.ovpn" -print -quit)
-    else
-        export VPN_CONFIG=$(find /config/wireguard -maxdepth 1 -name "*.conf" -print -quit)
-    fi
+  # Wildcard search for openvpn config files (match on first result)
+  if [[ "${VPN_TYPE}" == "openvpn" ]]; then
+    export VPN_CONFIG=$(find /config/openvpn -maxdepth 1 -name "*.ovpn" -print -quit)
+  else
+    export VPN_CONFIG=$(find /config/wireguard -maxdepth 1 -name "*.conf" -print -quit)
+  fi
 }
 
 check_if_vpn_files_exist() {
-    # If ovpn file not found in /config/openvpn or /config/wireguard then exit
-    if [[ -z "${VPN_CONFIG}" ]]; then
-        if [[ "${VPN_TYPE}" == "openvpn" ]]; then
-            exit_script "No OpenVPN config file found in /config/openvpn/. Please download one from your VPN provider and restart this container. Make sure the file extension is '.ovpn'"
-        else
-            exit_script "No WireGuard config file found in /config/wireguard/. Please download one from your VPN provider and restart this container. Make sure the file extension is '.conf'"
-        fi
+  # If ovpn file not found in /config/openvpn or /config/wireguard then exit
+  if [[ -z "${VPN_CONFIG}" ]]; then
+    if [[ "${VPN_TYPE}" == "openvpn" ]]; then
+      log_error_and_exit "No OpenVPN config file found in /config/openvpn/. Please download one from your VPN provider and restart this container. Make sure the file extension is '.ovpn'"
+    else
+      log_error_and_exit "No WireGuard config file found in /config/wireguard/. Please download one from your VPN provider and restart this container. Make sure the file extension is '.conf'"
     fi
+  fi
 }
 
 check_and_log_vpn_config_file() {
-    if [[ "${VPN_TYPE}" == "openvpn" ]]; then
-        echo "[INFO] OpenVPN config file is found at ${VPN_CONFIG}" | ts '%Y-%m-%d %H:%M:%.S'
-    else
-        echo "[INFO] WireGuard config file is found at ${VPN_CONFIG}" | ts '%Y-%m-%d %H:%M:%.S'
-        if [[ "${VPN_CONFIG}" != "/config/wireguard/wg0.conf" ]]; then
-            exit_script "WireGuard config filename is not 'wg0.conf'. Rename ${VPN_CONFIG} to 'wg0.conf"
-        fi
+  if [[ "${VPN_TYPE}" == "openvpn" ]]; then
+    log_info "OpenVPN config file is found at ${VPN_CONFIG}"
+  else
+    log_info "WireGuard config file is found at ${VPN_CONFIG}"
+    if [[ "${VPN_CONFIG}" != "/config/wireguard/wg0.conf" ]]; then
+      log_error_and_exit "WireGuard config filename is not 'wg0.conf'. Rename ${VPN_CONFIG} to 'wg0.conf"
     fi
+  fi
 }
 
 configure_vpn() {
-    local VPN_TYPE=$1
-    local VPN_CONFIG=$2
-    local VPN_USERNAME=$3
-    local VPN_PASSWORD=$4
+  local vpn_type="$1"
+  local vpn_config="$2"
+  local vpn_username="$3"
+  local vpn_password="$4"
 
-    # Read username and password env vars and put them in credentials.conf, then add ovpn config for credentials file
-    if [[ "${VPN_TYPE}" == "openvpn" ]]; then
-        if [[ ! -z "${VPN_USERNAME}" ]] && [[ ! -z "${VPN_PASSWORD}" ]]; then
-            if [[ ! -e /config/openvpn/credentials.conf ]]; then
-                touch /config/openvpn/credentials.conf
-            fi
+  if [[ "${vpn_type,,}" == "openvpn" && -n "${vpn_username}" && -n "${vpn_password}" ]]; then
+    local credentials_path="/config/openvpn/credentials.conf"
 
-            echo "${VPN_USERNAME}" > /config/openvpn/credentials.conf
-            echo "${VPN_PASSWORD}" >> /config/openvpn/credentials.conf
-
-            # Replace line with one that points to credentials.conf
-            auth_cred_exist=$(cat "${VPN_CONFIG}" | grep -m 1 'auth-user-pass')
-            if [[ ! -z "${auth_cred_exist}" ]]; then
-                # Get line number of auth-user-pass
-                LINE_NUM=$(grep -Fn -m 1 'auth-user-pass' "${VPN_CONFIG}" | cut -d: -f 1)
-                sed -i "${LINE_NUM}s/.*/auth-user-pass credentials.conf/" "${VPN_CONFIG}"
-            else
-                sed -i "1s/.*/auth-user-pass credentials.conf/" "${VPN_CONFIG}"
-            fi
-        fi
+    if [[ ! -e "${credentials_path}" ]]; then
+      touch "${credentials_path}"
     fi
+
+    echo -e "${vpn_username}\n${vpn_password}" >"${credentials_path}"
+
+    if grep -q -F -- 'auth-user-pass' "${vpn_config}"; then
+      sed -i "/auth-user-pass/c\auth-user-pass ${credentials_path}" "${vpn_config}"
+    else
+      echo -e "auth-user-pass ${credentials_path}\n$(cat "${vpn_config}")" >"${vpn_config}"
+    fi
+  fi
 }
 
-parse_config() {
-    local vpn_type="${1}"
-    local vpn_config="${2}"
+extract_vpn_remote_address() {
+  local vpn_type="${1,,}"
+  local vpn_config="${2}"
 
-   case "${vpn_type}" in
-        "openvpn")
-            grep -P -o -m 1 '(?<=^remote\s)[^\n\r]+' "${vpn_config}"
-            ;;
-        *)
-            cat "${vpn_config}" | grep -P -o -m 1 '(?<=^Endpoint)(\s{0,})[^\n\r]+' | sed -e 's~^[=\ ]*~~'
-            ;;
-    esac
-}
+  validate_vpn_type "${vpn_type}"
 
-get_value() {
-    local regex="${1}"
-    local line="${2}"
-    echo "${line}" | grep -P -o -m 1 "${regex}"
+  case "${vpn_type}" in
+  "openvpn")
+    grep -P -o -m 1 '(?<=^remote\s)[^\n\r]+' "${vpn_config}"
+    ;;
+  "wireguard")
+    grep -P -o -m 1 '(?<=^Endpoint)(\s{0,})[^\n\r]+' "${vpn_config}" | sed -e 's~^[=\ ]*~~'
+    ;;
+  esac
 }
 
 convert_to_unix() {
-    local file="${1}"
-    dos2unix "${file}" 1> /dev/null
+  local file="${1}"
+  dos2unix "${file}" 1>/dev/null
 }
 
-print_info() {
-    local key="${1}"
-    local value="${2}"
-    if [[ ! -z "${value}" ]]; then
-        echo "[INFO] ${key} defined as '${value}'" | ts '%Y-%m-%d %H:%M:%.S'
-    else
-        exit_script "${key} not found in ${VPN_CONFIG}, exiting..."
-    fi
+validate_and_log_key_value() {
+  local key="${1}"
+  local value="${2}"
+  if [[ -n "${value}" ]]; then
+    log_info "${key} defined as '${value}'"
+  else
+    log_error_and_exit "${key} not found in ${VPN_CONFIG}, exiting..."
+  fi
 }
 
 configure_remote() {
-    local vpn_type="${1}"
-	local vpn_remote_line="${2}"
-    
-    if [[ "${vpn_type}" == "openvpn" ]]; then
-        echo "${vpn_remote_line}" | grep -P -o -m 1 '^[^\s\r\n]+' | sed -e 's~^[ \t]*~~;s~[ \t]*$~~'
-    else
-        echo "${vpn_remote_line}" | grep -P -o -m 1 '^[^:\r\n]+'
-    fi
+  local vpn_type="${1}"
+  local vpn_remote_line="${2}"
+
+  validate_vpn_type "${vpn_type}"
+
+  case "${vpn_type}" in
+  "openvpn")
+    echo "${vpn_remote_line}" | grep -P -o -m 1 '^[^\s\r\n]+' | sed -e 's~^[ \t]*~~;s~[ \t]*$~~'
+    ;;
+  "wireguard")
+    echo "${vpn_remote_line}" | grep -P -o -m 1 '^[^:\r\n]+'
+    ;;
+  esac
 }
 
 configure_port() {
-    local vpn_type="${1}"
-	local vpn_remote_line="${2}"
-    
-    if [[ "${vpn_type}" == "openvpn" ]]; then
-        echo "${vpn_remote_line}" | grep -P -o -m 1 '(?<=\s)\d{2,5}(?=\s)?+' | sed -e 's~^[ \t]*~~;s~[ \t]*$~~'
-    else
-        echo "${vpn_remote_line}" | grep -P -o -m 1 '(?<=:)\d{2,5}(?=:)?+'
-    fi
+  local vpn_type="${1}"
+  local vpn_remote_line="${2}"
+
+  validate_vpn_type "${vpn_type}"
+
+  case "${vpn_type}" in
+  "openvpn")
+    echo "${vpn_remote_line}" | grep -P -o -m 1 '(?<=\s)\d{2,5}(?=\s)?+' | sed -e 's~^[ \t]*~~;s~[ \t]*$~~'
+    ;;
+  "wireguard")
+    echo "${vpn_remote_line}" | grep -P -o -m 1 '(?<=:)\d{2,5}(?=:)?+'
+    ;;
+  esac
 }
 
 configure_protocol() {
-    local vpn_type="${1}"
-    
-    if [[ "${vpn_type}" == "openvpn" ]]; then
-        echo "udp|tcp-client|tcp$"
-    else
-        echo "udp"
-    fi
+  local vpn_type="${1}"
+
+  validate_vpn_type "${vpn_type}"
+
+  case "${vpn_type}" in
+  "openvpn")
+    echo "udp|tcp-client|tcp$"
+    ;;
+  "wireguard")
+    echo "udp"
+    ;;
+  esac
 }
 
 configure_device_type() {
-    local vpn_type="${1}"
-    
-    if [[ "${vpn_type}" == "openvpn" ]]; then
-        grep -P -o -m 1 '(?<=^dev\s)[^\r\n\d]+'
-    else
-        echo "wg0"
-    fi
+  local vpn_type="${1}"
+
+  validate_vpn_type "${vpn_type}"
+
+  case "${vpn_type}" in
+  "openvpn")
+    grep -P -o -m 1 '(?<=^dev\s)[^\r\n\d]+'
+    ;;
+  "wireguard")
+    echo "wg0"
+    ;;
+  esac
 }
 
 configure_env_vars() {
-    local name="${1}"
-    local default="${2}"
-    
-    local value=$(echo "${!name}" | sed -e 's~^[ \t]*~~;s~[ \t]*$~~')
-    
-    if [[ ! -z "${value}" ]]; then
-        echo "[INFO] ${name} defined as '${value}'" | ts '%Y-%m-%d %H:%M:%.S'
-    elif [[ ! -z "${default}" ]]; then
-        echo "[WARNING] ${name} not defined (via -e ${name}), defaulting to '${default}'" | ts '%Y-%m-%d %H:%M:%.S'
-        export "${name}=${default}"
-    else
-        exit_script "${name} not defined (via -e ${name}), exiting..."
-    fi
+  local name="${1}"
+  local default="${2}"
+
+  local value=$(echo "${!name}" | sed -e 's~^[ \t]*~~;s~[ \t]*$~~')
+
+  if [[ ! -z "${value}" ]]; then
+    log_info "${name} defined as '${value}'"
+  elif [[ ! -z "${default}" ]]; then
+    log_warning "${name} not defined (via -e ${name}), defaulting to '${default}'"
+    export "${name}=${default}"
+  else
+    log_error_and_exit "${name} not defined (via -e ${name}), exiting..."
+  fi
 }
 
-add_to_resolv_conf() {
-    local name_server_list
-    IFS=',' read -ra name_server_list <<< "${NAME_SERVERS}"
-    for name_server_item in "${name_server_list[@]}"; do
-        # strip whitespace from start and end of lan_network_item
-        name_server_item=$(echo "${name_server_item}" | sed -e 's~^[ \t]*~~;s~[ \t]*$~~')
-        
-        echo "[INFO] Adding ${name_server_item} to resolv.conf" | ts '%Y-%m-%d %H:%M:%.S'
-        echo "nameserver ${name_server_item}" >> /etc/resolv.conf
-    done
+start_open_vpn() {
+  log_info "Starting OpenVPN..."
+
+  exec openvpn --pull-filter ignore route-ipv6 --pull-filter ignore ifconfig-ipv6 --config "/config/openvpn/${VPN_CONFIG}" &
 }
 
-set_default_user_and_group() {
-    if [[ -z "${PUID}" ]]; then
-        echo "[INFO] PUID not defined. Defaulting to root user" | ts '%Y-%m-%d %H:%M:%.S'
-        export PUID="root"
-    fi
+start_wire_guard() {
+  log_info "Starting WireGuard..."
 
-    if [[ -z "${PGID}" ]]; then
-        echo "[INFO] PGID not defined. Defaulting to root group" | ts '%Y-%m-%d %H:%M:%.S'
-        export PGID="root"
-    fi
+  local conf_name=$(basename -s .conf "${VPN_CONFIG}")
+  if ip link | grep -q "${conf_name}"; then
+    wg-quick down "${VPN_CONFIG}" || log_info "WireGuard is down already"
+    sleep 0.5
+  fi
+
+  wg-quick up "/config/wireguard/${VPN_CONFIG}"
 }
 
-setup_VPN() {
-    if [[ "${VPN_TYPE}" == "openvpn" ]]; then
-        echo "[INFO] Starting OpenVPN..." | ts '%Y-%m-%d %H:%M:%.S'
-        cd /config/openvpn
-        exec openvpn --pull-filter ignore route-ipv6 --pull-filter ignore ifconfig-ipv6 --config "${VPN_CONFIG}" &
-    else
-        echo "[INFO] Starting WireGuard..." | ts '%Y-%m-%d %H:%M:%.S'
-        cd /config/wireguard
-        [ $(ip link | grep -q `basename -s .conf $VPN_CONFIG`) ] && \
-            { wg-quick down $VPN_CONFIG || echo "WireGuard is down already" | ts '%Y-%m-%d %H:%M:%.S'; sleep 0.5; }
-        wg-quick up $VPN_CONFIG
-    fi
-    
+start_vpn() {
+  if [[ "${VPN_TYPE}" == "openvpn" ]]; then
+    start_open_vpn
+  else
+    start_wire_guard
+  fi
+}
+
+display_warning_vpn_disabled() {
+  log_warning "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"
+  log_warning "THE CONTAINER IS RUNNING WITH VPN DISABLED"
+  log_warning "PLEASE MAKE SURE VPN_ENABLED IS SET TO 'yes'"
+  log_warning "IF THIS IS INTENTIONAL, YOU CAN IGNORE THIS"
+  log_warning "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"
+}
+
+start_qbittorrent() {
+  if [[ "${VPN_ENABLED}" =~ ^(1|true|yes)$ ]]; then
     exec /bin/bash /etc/qbittorrent/iptables.sh
-}
-
-display_warning_VPN_disabled() {
-    echo "[WARNIG] @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@" | ts '%Y-%m-%d %H:%M:%.S'
-    echo "[WARNIG] THE CONTAINER IS RUNNING WITH VPN DISABLED" | ts '%Y-%m-%d %H:%M:%.S'
-    echo "[WARNIG] PLEASE MAKE SURE VPN_ENABLED IS SET TO 'yes'" | ts '%Y-%m-%d %H:%M:%.S'
-    echo "[WARNIG] IF THIS IS INTENTIONAL, YOU CAN IGNORE THIS" | ts '%Y-%m-%d %H:%M:%.S'
-    echo "[WARNIG] @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@" | ts '%Y-%m-%d %H:%M:%.S'
-    
+  else
     exec /bin/bash /etc/qbittorrent/start.sh
+  fi
 }
 
-check_network_dependencies
-check_vpn_enabled
-check_iptables_mode
+ensure_network_deps
+configure_vpn_enabled
+configure_iptables_mode
+configure_dns_servers
+configure_user_rights
 
+if [[ "${VPN_ENABLED}" =~ ^(1|true|yes)$ ]]; then
+  setup_vpn_type
+  setup_config_directory
+  search_for_vpn_config_files
+  check_if_vpn_files_exist
+  check_and_log_vpn_config_file
 
-if [[ $VPN_ENABLED == "1" || $VPN_ENABLED == "true" || $VPN_ENABLED == "yes" ]]; then
-	check_vpn_type
-	create_and_set_permissions_for_config_dir
-	search_for_vpn_config_files
-	check_if_vpn_files_exist
-	check_and_log_vpn_config_file
+  configure_vpn "${VPN_TYPE}" "${VPN_CONFIG}" "${VPN_USERNAME}" "${VPN_PASSWORD}"
+  convert_to_unix "${VPN_CONFIG}"
 
-	configure_vpn "${VPN_TYPE}" "${VPN_CONFIG}" "${VPN_USERNAME}" "${VPN_PASSWORD}"
-	convert_to_unix "${VPN_CONFIG}"
-	vpn_remote_line=$(parse_config "${VPN_TYPE}" "${VPN_CONFIG}")
+  vpn_remote_line=$(extract_vpn_remote_address "${VPN_TYPE}" "${VPN_CONFIG}")
 
-	print_info "VPN remote line" "${vpn_remote_line}"
+  validate_and_log_key_value "VPN remote line" "${vpn_remote_line}"
 
-	export VPN_REMOTE="$(configure_remote "${VPN_TYPE}" "${vpn_remote_line}")"
-	print_info "VPN_REMOTE" "${VPN_REMOTE}"
+  export VPN_REMOTE="$(configure_remote "${VPN_TYPE}" "${vpn_remote_line}")"
+  validate_and_log_key_value "VPN_REMOTE" "${VPN_REMOTE}"
 
-	export VPN_PORT="$(configure_port "${VPN_TYPE}" "${vpn_remote_line}")"
-	print_info "VPN_PORT" "${VPN_PORT}"
+  export VPN_PORT="$(configure_port "${VPN_TYPE}" "${vpn_remote_line}")"
+  validate_and_log_key_value "VPN_PORT" "${VPN_PORT}"
 
-	export VPN_PROTOCOL="$(configure_protocol "${VPN_TYPE}")"
-	print_info "VPN_PROTOCOL" "${VPN_PROTOCOL}"
+  export VPN_PROTOCOL="$(configure_protocol "${VPN_TYPE}")"
+  validate_and_log_key_value "VPN_PROTOCOL" "${VPN_PROTOCOL}"
 
-	export VPN_DEVICE_TYPE="$(configure_device_type "${VPN_TYPE}")"
-	print_info "VPN_DEVICE_TYPE" "${VPN_DEVICE_TYPE}"
+  export VPN_DEVICE_TYPE="$(configure_device_type "${VPN_TYPE}")"
+  validate_and_log_key_value "VPN_DEVICE_TYPE" "${VPN_DEVICE_TYPE}"
 
-	configure_env_vars "LAN_NETWORK" ""
-	configure_env_vars "NAME_SERVERS" "1.1.1.1,8.8.8.8,1.0.0.1,8.8.4.4"
+  configure_env_vars "LAN_NETWORK" ""
+  configure_env_vars "NAME_SERVERS" "1.1.1.1,8.8.8.8,1.0.0.1,8.8.4.4"
 
-	if [[ "${VPN_TYPE}" == "openvpn" ]]; then
-		configure_env_vars "VPN_OPTIONS" ""
-	fi
+  if [[ "${VPN_TYPE}" == "openvpn" ]]; then
+    configure_env_vars "VPN_OPTIONS" ""
+  fi
 
+  start_vpn
 else
-	echo "[WARNING] !!IMPORTANT!! You have set the VPN to disabled, your connection will NOT be secure!" | ts '%Y-%m-%d %H:%M:%.S'
+  display_warning_vpn_disabled
 fi
 
-add_to_resolv_conf
-set_default_user_and_group
-if [[ $VPN_ENABLED == "1" || $VPN_ENABLED == "true" || $VPN_ENABLED == "yes" ]]; then
-	setup_VPN
-else
-	display_warning_VPN_disabled
-fi
+start_qbittorrent
