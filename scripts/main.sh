@@ -1,9 +1,12 @@
 #!/bin/bash
 
-source ./constants.sh
-source ./setup.sh
-source ./vpn-config.sh
-source ./start-services.sh
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+
+# Source scripts using the dynamic base path
+source "${SCRIPT_DIR}/constants.sh"
+source "${SCRIPT_DIR}/setup.sh"
+source "${SCRIPT_DIR}/vpn-config.sh"
+source "${SCRIPT_DIR}/start-services.sh"
 
 set -o errexit
 set -o nounset
