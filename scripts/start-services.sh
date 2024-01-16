@@ -21,7 +21,7 @@ start_wire_guard() {
         wg-quick down "${vpn_config_path}" || log_info "WireGuard is down already"
         sleep "${SLEEP_DELAY}"
     fi
-    wg-quick up "/config/wireguard/${vpn_config_path}"
+    wg-quick up "${vpn_config_path}"
 }
 
 start_vpn() {
