@@ -59,7 +59,9 @@ configure_iptables_mode() {
 # Configure DNS name servers
 configure_dns_servers() {
     if [[ -z "${NAME_SERVERS}" ]]; then
-        log_error_and_exit "No name servers provided in NAME_SERVERS. Exiting..."
+		export NAME_SERVERS="1.1.1.1,8.8.8.8,1.0.0.1,8.8.4.4"
+
+        log_info "No name servers provided in NAME_SERVERS, defaulting to Cloudflare and Google name servers"
     fi
 
     local -a dns_servers
