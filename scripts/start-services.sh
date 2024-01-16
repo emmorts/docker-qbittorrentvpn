@@ -53,8 +53,12 @@ start_qbittorrent() {
     local vpn_enabled="${1}"
 
     if [[ "${vpn_enabled}" =~ ${TRUE_REGEX} ]]; then
+        log_info "Starting qBitTorrent with VPN enabled..."
+
         exec /bin/bash /etc/qbittorrent/iptables.sh
     else
+        log_info "Starting qBitTorrent without VPN..."
+
         exec /bin/bash /etc/qbittorrent/start.sh
     fi
 }

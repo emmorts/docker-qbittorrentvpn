@@ -9,7 +9,6 @@ source "${SCRIPT_DIR}/vpn-config.sh"
 source "${SCRIPT_DIR}/start-services.sh"
 
 set -o errexit
-set -o nounset
 set -o pipefail
 
 ensure_network_deps
