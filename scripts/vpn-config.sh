@@ -32,9 +32,9 @@ detect_vpn_configuration_file() {
     fi
 
     if [[ ! -f "${VPN_CONFIG}" ]]; then
-        error_exit "No '${VPN_TYPE}' configuration file found in /config/${VPN_TYPE}/. Please download one from your VPN provider and restart this container."
+        log_error_and_exit "No '${VPN_TYPE}' configuration file found in /config/${VPN_TYPE}/. Please download one from your VPN provider and restart this container."
     else
-        echo_log "'${VPN_TYPE}' configuration file found at '${VPN_CONFIG}'"
+        log_info "'${VPN_TYPE}' configuration file found at '${VPN_CONFIG}'"
     fi
 
     validate_wireguard_config_name
@@ -43,7 +43,7 @@ detect_vpn_configuration_file() {
 # Verify the WireGuard configuration file's name
 validate_wireguard_config_name() {
     if [[ "${VPN_TYPE}" == "wireguard" && "${VPN_CONFIG}" != "/config/wireguard/wg0.conf" ]]; then
-        error_exit "WireGuard configuration file name must be 'wg0.conf'. Rename ${VPN_CONFIG} to '/config/wireguard/wg0.conf'."
+        log_error_and_exit "WireGuard configuration file name must be 'wg0.conf'. Rename ${VPN_CONFIG} to '/config/wireguard/wg0.conf'."
     fi
 }
 
