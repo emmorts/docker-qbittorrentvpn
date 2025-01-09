@@ -25,10 +25,13 @@ WORKDIR /build
 # Build boost
 RUN BOOST_VERSION_DOT=$(curl -sX GET "https://www.boost.org/feed/news.rss" | xmllint --xpath '//rss/channel/item/title/text()' - | awk -F 'Version' '{print $2 FS}' - | sed -e 's/Version//g;s/\ //g' | xargs | awk 'NR==1{print $1}' -) \
     && BOOST_VERSION=$(echo ${BOOST_VERSION_DOT} | head -n 1 | sed -e 's/\./_/g') \
-    && curl -L https://boostorg.jfrog.io/artifactory/main/release/${BOOST_VERSION_DOT}/source/boost_${BOOST_VERSION}.tar.gz | tar xz \
-    && cd boost_${BOOST_VERSION} \
+    && curl -o /opt/boost_${BOOST_VERSION}.tar.gz -L https://boostorg.jfrog.io/artifactory/main/release/${BOOST_VERSION_DOT}/source/boost_${BOOST_VERSION}.tar.gz \
+    && tar -xzf /opt/boost_${BOOST_VERSION}.tar.gz -C /opt \
+    && cd /opt/boost_${BOOST_VERSION} \
     && ./bootstrap.sh --prefix=/usr \
-    && ./b2 --prefix=/usr install
+    && ./b2 --prefix=/usr install \
+    && cd /opt \
+    && rm -rf /opt/*
 
 # Build libtorrent-rasterbar
 RUN LIBTORRENT_ASSETS=$(curl -sX GET "https://api.github.com/repos/arvidn/libtorrent/releases" | jq '.[] | select(.prerelease==false) | select(.target_commitish=="RC_1_2") | .assets_url' | head -n 1 | tr -d '"') \
