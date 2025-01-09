@@ -28,7 +28,7 @@ RUN set -x \
     && echo "Detected Boost version: ${BOOST_VERSION_DOT}" \
     && BOOST_VERSION=$(echo ${BOOST_VERSION_DOT} | sed -e 's/\./_/g') \
     && echo "Normalized Boost version: ${BOOST_VERSION}" \
-    && BOOST_URL="https://boostorg.jfrog.io/artifactory/main/release/${BOOST_VERSION_DOT}/source/boost_${BOOST_VERSION}.tar.gz" \
+    && BOOST_URL="https://archives.boost.io/release/${BOOST_VERSION_DOT}/source/boost_${BOOST_VERSION}.tar.gz" \
     && echo "Download URL: ${BOOST_URL}" \
     && curl -L -o boost_${BOOST_VERSION}.tar.gz "${BOOST_URL}" \
     && tar -xzf boost_${BOOST_VERSION}.tar.gz \
