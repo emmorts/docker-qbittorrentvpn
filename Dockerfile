@@ -36,7 +36,7 @@ RUN \
 # Image for building
 FROM base AS builder
 
-ARG QBT_VERSION="4.6.3" \
+ARG QBT_VERSION="5.0.3" \
     BOOST_VERSION_MAJOR="1" \
     BOOST_VERSION_MINOR="86" \
     BOOST_VERSION_PATCH="0" \
