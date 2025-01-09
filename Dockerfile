@@ -23,35 +23,47 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /build
 
 # Build boost
-RUN set -x \
-    && BOOST_VERSION_DOT=$(curl -sX GET "https://www.boost.org/feed/news.rss" | xmllint --xpath '//rss/channel/item/title/text()' - | awk -F 'Version' '{print $2 FS}' - | sed -e 's/Version//g;s/\ //g' | xargs | awk 'NR==1{print $1}' -) \
+RUN BOOST_VERSION_DOT=$(curl -sX GET "https://www.boost.org/feed/news.rss" | xmllint --xpath '//rss/channel/item/title/text()' - | awk -F 'Version' '{print $2 FS}' - | sed -e 's/Version//g;s/\ //g' | xargs | awk 'NR==1{print $1}' -) \
     && echo "Detected Boost version: ${BOOST_VERSION_DOT}" \
     && BOOST_VERSION=$(echo ${BOOST_VERSION_DOT} | sed -e 's/\./_/g') \
-    && echo "Normalized Boost version: ${BOOST_VERSION}" \
     && BOOST_URL="https://archives.boost.io/release/${BOOST_VERSION_DOT}/source/boost_${BOOST_VERSION}.tar.gz" \
-    && echo "Download URL: ${BOOST_URL}" \
     && curl -L -o boost_${BOOST_VERSION}.tar.gz "${BOOST_URL}" \
     && tar -xzf boost_${BOOST_VERSION}.tar.gz \
     && cd boost_${BOOST_VERSION} \
     && ./bootstrap.sh --prefix=/usr \
-    && ./b2 --prefix=/usr install \
-    && cd /opt \
-    && rm -rf /opt/*
+    && ./b2 --prefix=/usr install -j$(nproc) \
+    && ldconfig
 
 # Build libtorrent-rasterbar
 RUN LIBTORRENT_ASSETS=$(curl -sX GET "https://api.github.com/repos/arvidn/libtorrent/releases" | jq '.[] | select(.prerelease==false) | select(.target_commitish=="RC_1_2") | .assets_url' | head -n 1 | tr -d '"') \
-    && LIBTORRENT_DOWNLOAD_URL=$(curl -sX GET ${LIBTORRENT_ASSETS} | jq '.[0] .browser_download_url' | tr -d '"') \
+    && LIBTORRENT_INFO=$(curl -sX GET ${LIBTORRENT_ASSETS} | jq '.[0]') \
+    && LIBTORRENT_VERSION=$(echo "${LIBTORRENT_INFO}" | jq -r '.name' | grep -oP 'libtorrent-rasterbar-\K[0-9]+\.[0-9]+\.[0-9]+(?=\.tar\.gz)') \
+    && echo "Detected libtorrent version: ${LIBTORRENT_VERSION}" \
+    && LIBTORRENT_DOWNLOAD_URL=$(echo "${LIBTORRENT_INFO}" | jq -r '.browser_download_url') \
     && curl -L ${LIBTORRENT_DOWNLOAD_URL} | tar xz \
     && cd libtorrent-rasterbar* \
-    && cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX:PATH=/usr -DCMAKE_CXX_STANDARD=17 \
+    && cmake -G Ninja -B build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr \
+        -DCMAKE_CXX_STANDARD=17 \
+        -DBoost_USE_STATIC_LIBS=OFF \
+        -DBoost_USE_STATIC_RUNTIME=OFF \
     && cmake --build build --parallel $(nproc) \
-    && cmake --install build
+    && cmake --install build \
+    && ldconfig
 
 # Build qBittorrent
 RUN QBITTORRENT_RELEASE=$(curl -sX GET "https://api.github.com/repos/qBittorrent/qBittorrent/tags" | jq '.[] | select(.name | index ("alpha") | not) | select(.name | index ("beta") | not) | select(.name | index ("rc") | not) | .name' | head -n 1 | tr -d '"') \
+    && echo "Detected qBittorrent version: ${QBITTORRENT_RELEASE}" \
     && curl -L "https://github.com/qbittorrent/qBittorrent/archive/${QBITTORRENT_RELEASE}.tar.gz" | tar xz \
     && cd qBittorrent-${QBITTORRENT_RELEASE} \
-    && cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local -DGUI=OFF -DCMAKE_CXX_STANDARD=17 \
+    && cmake -G Ninja -B build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr \
+        -DGUI=OFF \
+        -DCMAKE_CXX_STANDARD=17 \
+        -DBoost_USE_STATIC_LIBS=OFF \
+        -DBoost_USE_STATIC_RUNTIME=OFF \
     && cmake --build build --parallel $(nproc) \
     && cmake --install build
 
@@ -91,7 +103,7 @@ RUN echo "deb http://deb.debian.org/debian/ unstable main" > /etc/apt/sources.li
     && sed -i /net\.ipv4\.conf\.all\.src_valid_mark/d `which wg-quick`
 
 # Copy built artifacts from builder stage
-COPY --from=builder /usr/local/bin/qbittorrent-nox /usr/local/bin/
+COPY --from=builder /usr/bin/qbittorrent-nox /usr/bin/
 COPY --from=builder /usr/lib/libboost_* /usr/lib/
 COPY --from=builder /usr/lib/libtorrent-rasterbar.so* /usr/lib/
 
