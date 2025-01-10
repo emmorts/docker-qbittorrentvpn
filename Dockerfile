@@ -69,6 +69,7 @@ FROM alpine:latest
 RUN apk add --no-cache \
         bash \
         dos2unix \
+        grep \
         ipcalc \
         iptables \
         libstdc++ \
