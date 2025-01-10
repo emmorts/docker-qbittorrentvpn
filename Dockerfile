@@ -91,7 +91,9 @@ RUN apk add --no-cache \
 # Create non-root user
 RUN adduser -D -H -s /sbin/nologin -u 1000 qbtUser && \
     # Remove src_valid_mark from wg-quick (required for proper WireGuard operation)
-    sed -i /net.ipv4.conf.all.src_valid_mark/d $(which wg-quick)
+    sed -i /net.ipv4.conf.all.src_valid_mark/d $(which wg-quick) && \
+    mkdir -p /tmp && \
+    chmod 1777 /tmp
 
 # Copy qBittorrent binary
 COPY --from=builder /usr/bin/qbittorrent-nox /usr/bin/qbittorrent-nox

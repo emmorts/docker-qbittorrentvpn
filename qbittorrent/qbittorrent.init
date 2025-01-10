@@ -2,7 +2,7 @@
 
 NAME="qbittorrent"
 DESC="qBittorrent Daemon"
-PIDFILE="/var/run/$NAME.pid"
+PIDFILE="/tmp/$NAME.pid"
 DAEMON="/usr/local/bin/qbittorrent-nox"
 DAEMON_ARGS="--profile=/config"
 QBITTORRENTLOGPATH="/config/qBittorrent/data/logs/"
@@ -56,7 +56,13 @@ start_daemon() {
 
     log_message "Starting $DESC..."
     cd /
-    eval "$DAEMON $DAEMON_ARGS >> $QBITTORRENTLOGPATH$QBITTORRENTLOG 2>&1 &"
+    OUTPUT=$($DAEMON $DAEMON_ARGS 2>&1 & echo $!)
+    PID=$!
+    
+    # Log the output if there was any
+    if [ -n "$OUTPUT" ]; then
+        log_message "Daemon output: $OUTPUT"
+    fi
     PID=$!
     echo $PID > "$PIDFILE"
     
