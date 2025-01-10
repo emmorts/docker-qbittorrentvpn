@@ -104,7 +104,7 @@ chmod -R 755 /config/qBittorrent
 # wait for the qbittorrent.init script to finish and grab the qbittorrent pid
 # from the file created by the start script
 wait $!
-qbittorrentpid=$(cat /var/run/qbittorrent.pid)
+qbittorrentpid=$(cat /tmp/qbittorrent.pid)
 
 # If the process exists, make sure that the log file has the proper rights and start the health check
 if [ -e /proc/$qbittorrentpid ]; then
