@@ -5,7 +5,7 @@ A lightweight Docker container running latest [qBittorrent](https://github.com/q
 ## Features
 
 - Ultra-lightweight Alpine Linux base (41.3 MB total image size, more than 4x smaller than [DyonR/docker-qbittorrentvpn](https://github.com/DyonR/docker-qbittorrentvpn))
-- Latest qBittorrent v5.0.3 with libtorrent, compiled from source
+- Latest qBittorrent v5.0.4 with libtorrent, compiled from source
 - WireGuard and OpenVPN support with automatic killswitch
 - Enhanced error handling and reliability
 - Configurable UID/GID for seamless file permissions

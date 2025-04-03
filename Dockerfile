@@ -2,7 +2,7 @@
 FROM alpine:latest AS builder
 
 # Build arguments with explicit versions for better reproducibility
-ARG QBT_VERSION="5.0.3" \
+ARG QBT_VERSION="5.0.4" \
     BOOST_VERSION_MAJOR="1" \
     BOOST_VERSION_MINOR="86" \
     BOOST_VERSION_PATCH="0" \

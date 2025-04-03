@@ -130,12 +130,16 @@ configure_protocol() {
 
 configure_device_type() {
     local vpn_type="${1}"
+    local vpn_config="${2}"
 
     validate_vpn_type "${vpn_type}"
 
     case "${vpn_type}" in
     "openvpn")
-        grep -P -o -m 1 '(?<=^dev\s)[^\r\n\d]+'
+        local device_type=$(cat "${vpn_config}" | grep -P -o -m 1 '(?<=^dev\s)[^\r\n\d]+' | sed -e 's~^[ \t]*~~;s~[ \t]*$~~')
+        if [[ ! -z "${device_type}" ]]; then
+            echo "${device_type}0"
+        fi
         ;;
     "wireguard")
         echo "wg0"

@@ -38,7 +38,7 @@ if [[ "${VPN_ENABLED}" =~ ${TRUE_REGEX} ]]; then
     export VPN_PROTOCOL="$(configure_protocol "${VPN_TYPE}")"
     validate_key_value "VPN_PROTOCOL" "${VPN_PROTOCOL}" "${VPN_CONFIG}"
 
-    export VPN_DEVICE_TYPE="$(configure_device_type "${VPN_TYPE}")"
+    export VPN_DEVICE_TYPE="$(configure_device_type "${VPN_TYPE}" "${VPN_CONFIG}")"
     validate_key_value "VPN_DEVICE_TYPE" "${VPN_DEVICE_TYPE}" "${VPN_CONFIG}"
 
     configure_env_vars "LAN_NETWORK" ""
