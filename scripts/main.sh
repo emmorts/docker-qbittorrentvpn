@@ -45,7 +45,7 @@ if [[ "${VPN_ENABLED}" =~ ${TRUE_REGEX} ]]; then
     configure_env_vars "NAME_SERVERS" "1.1.1.1,8.8.8.8,1.0.0.1,8.8.4.4"
 
     if [[ "${VPN_TYPE}" == "openvpn" ]]; then
-        configure_env_vars "VPN_OPTIONS" ""
+        configure_env_vars "VPN_OPTIONS" "" "true"
     fi
 
     start_vpn "${VPN_TYPE}" "${VPN_CONFIG}"

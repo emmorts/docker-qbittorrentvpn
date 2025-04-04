@@ -90,14 +90,18 @@ configure_user_rights() {
 configure_env_vars() {
     local env_var_name="${1}"
     local default_value="${2}"
+    local allow_empty="${3:-false}"
 
-    local env_var_value=$(echo "${!env_var_name}" | xargs)
+    local env_var_value=$(echo "${!env_var_name}" | sed -e 's~^[ \t]*~~;s~[ \t]*$~~')
 
     if [[ -n "${env_var_value}" ]]; then
         log_info "${env_var_name} defined as '${env_var_value}'"
     elif [[ -n "${default_value}" ]]; then
         log_warning "${env_var_name} not defined (via -e ${env_var_name}), defaulting to '${default_value}'"
         export "${env_var_name}=${default_value}"
+    elif [[ "${allow_empty}" == "true" ]]; then
+        log_info "${env_var_name} not defined (via -e ${env_var_name})"
+        export "${env_var_name}="
     else
         log_error_and_exit "${env_var_name} not defined (via -e ${env_var_name}), exiting..."
     fi
