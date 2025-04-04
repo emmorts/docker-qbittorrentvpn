@@ -6,7 +6,11 @@ start_open_vpn() {
     local vpn_config_path="${1}"
 
     log_info "Starting OpenVPN..."
-    exec openvpn --pull-filter ignore route-ipv6 --pull-filter ignore ifconfig-ipv6 --config "/config/openvpn/${vpn_config_path}" &
+    
+    local config_filename
+    config_filename=$(basename "${vpn_config_path}")
+    
+    exec openvpn --pull-filter ignore route-ipv6 --pull-filter ignore ifconfig-ipv6 --config "/config/openvpn/${config_filename}" &
 }
 
 start_wire_guard() {
