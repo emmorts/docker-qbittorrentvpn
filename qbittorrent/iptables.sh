@@ -153,7 +153,11 @@ iptables -A OUTPUT -o "${VPN_DEVICE_TYPE}" -j ACCEPT
 iptables -A OUTPUT -s "${docker_network_cidr}" -d "${docker_network_cidr}" -j ACCEPT
 
 # accept output from vpn gateway
-iptables -A OUTPUT -o "${docker_interface}" -p $VPN_PROTOCOL --dport $VPN_PORT -j ACCEPT
+if [[ "$VPN_PROTOCOL" == "tcp-client" || "$VPN_PROTOCOL" == "tcp" ]]; then
+    iptables -A OUTPUT -o "${docker_interface}" -p tcp --dport $VPN_PORT -j ACCEPT
+else
+    iptables -A OUTPUT -o "${docker_interface}" -p udp --dport $VPN_PORT -j ACCEPT
+fi
 
 # if iptable mangle is available (kernel module) then use mark
 if [[ $iptable_mangle_exit_code == 0 ]]; then

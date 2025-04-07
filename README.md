@@ -85,18 +85,23 @@ For IPv6 support:
 
 ### OpenVPN Setup
 
-1. Place your `.ovpn` file in `/config/openvpn/`
+1. Place your OpenVPN configuration file (`.ovpn` or `.conf`) in `/config/openvpn/`
 2. Set `VPN_TYPE=openvpn`
-3. If using credentials:
+3. If your configuration references external files:
+   - Certificate files (`.crt`) can be placed in the same directory
+   - If your config references `update-resolv-conf`, you can provide a custom script in the same directory
+4. If using credentials:
    ```conf
    # /config/openvpn/credentials.conf
    username
    password
    ```
-   Add to .ovpn:
+   Add to your OpenVPN config:
    ```
    auth-user-pass credentials.conf
    ```
+
+The container will automatically detect and properly handle all referenced files as long as they are placed in the `/config/openvpn/` directory.
 
 ## Docker Compose
 

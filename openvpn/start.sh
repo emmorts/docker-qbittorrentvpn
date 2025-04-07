@@ -144,17 +144,17 @@ setup_config_directory() {
 search_for_vpn_config_files() {
   # Wildcard search for openvpn config files (match on first result)
   if [[ "${VPN_TYPE}" == "openvpn" ]]; then
-    export VPN_CONFIG=$(find /config/openvpn -maxdepth 1 -name "*.ovpn" -print -quit)
+    export VPN_CONFIG=$(find /config/openvpn -maxdepth 1 \( -name "*.ovpn" -o -name "*.conf" \) -print -quit)
   else
     export VPN_CONFIG=$(find /config/wireguard -maxdepth 1 -name "*.conf" -print -quit)
   fi
 }
 
 check_if_vpn_files_exist() {
-  # If ovpn file not found in /config/openvpn or /config/wireguard then exit
+  # If config file not found in /config/openvpn or /config/wireguard then exit
   if [[ -z "${VPN_CONFIG}" ]]; then
     if [[ "${VPN_TYPE}" == "openvpn" ]]; then
-      log_error_and_exit "No OpenVPN config file found in /config/openvpn/. Please download one from your VPN provider and restart this container. Make sure the file extension is '.ovpn'"
+      log_error_and_exit "No OpenVPN config file found in /config/openvpn/. Please download one from your VPN provider and restart this container. Supported file extensions are '.ovpn' and '.conf'"
     else
       log_error_and_exit "No WireGuard config file found in /config/wireguard/. Please download one from your VPN provider and restart this container. Make sure the file extension is '.conf'"
     fi

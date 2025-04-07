@@ -23,21 +23,82 @@ establish_config_directory() {
     fi
 }
 
-# Find the VPN configuration file
 detect_vpn_configuration_file() {
     if [[ "${VPN_TYPE}" == "openvpn" ]]; then
-        export VPN_CONFIG=$(find /config/openvpn -maxdepth 1 -name "*.ovpn" -print -quit)
+        log_info "Search for OpenVPN config file in /config/openvpn"
+        log_info $(find /config/openvpn -maxdepth 1 \( -name "*.ovpn" -o -name "*.conf" \) ! -name "credentials.conf" -print -quit)
+        # Search for both .ovpn and .conf files for OpenVPN
+        export VPN_CONFIG=$(find /config/openvpn -maxdepth 1 \( -name "*.ovpn" -o -name "*.conf" \) ! -name "credentials.conf" -print -quit)
     else
+        log_info "Search for WireGuard config file in /config/wireguard"
+        log_info $(find /config/wireguard -maxdepth 1 -name "*.conf" -print -quit)
         export VPN_CONFIG=$(find /config/wireguard -maxdepth 1 -name "*.conf" -print -quit)
     fi
 
     if [[ ! -f "${VPN_CONFIG}" ]]; then
-        log_error_and_exit "No '${VPN_TYPE}' configuration file found in /config/${VPN_TYPE}/. Please download one from your VPN provider and restart this container."
+        if [[ "${VPN_TYPE}" == "openvpn" ]]; then
+            log_error_and_exit "No OpenVPN configuration file found in /config/openvpn/. Please download one from your VPN provider and restart this container. Supported file extensions are '.ovpn' and '.conf'"
+        else
+            log_error_and_exit "No WireGuard config file found in /config/wireguard/. Please download one from your VPN provider and restart this container. Make sure the file extension is '.conf'"
+        fi
     else
         log_info "'${VPN_TYPE}' configuration file found at '${VPN_CONFIG}'"
+
+        if [[ "${VPN_TYPE}" == "openvpn" ]]; then
+            setup_resolv_conf_script "${VPN_CONFIG}"
+        fi
     fi
 
     validate_wireguard_config_name
+}
+
+setup_resolv_conf_script() {
+    local vpn_config="$1"
+    
+    if grep -q "update-resolv-conf" "${vpn_config}"; then
+        log_info "Configuration refers to update-resolv-conf script"
+        
+        if [[ -f "/config/openvpn/update-resolv-conf" ]]; then
+            log_info "Found user-provided update-resolv-conf script, copying to /etc/openvpn/"
+            cp "/config/openvpn/update-resolv-conf" "/etc/openvpn/"
+            chmod +x "/etc/openvpn/update-resolv-conf"
+        else
+            log_warning "update-resolv-conf script not found in /config/openvpn/, creating a basic version"
+            cat > "/etc/openvpn/update-resolv-conf" << 'EOF'
+#!/bin/bash
+# Simple script to update resolv.conf for OpenVPN
+# This is version is created automatically
+
+# Log function
+log_msg() {
+    echo "$1" | ts '%Y-%m-%d %H:%M:%.S'
+}
+
+log_msg "[INFO] update-resolv-conf script called with args: $*"
+
+if [[ "$1" == "up" ]]; then
+    for var in "${!foreign_option_*}"; do
+        option="${!var}"
+        
+        if [[ "$option" == *"DOMAIN"* ]]; then
+            domain=$(echo "$option" | cut -d" " -f3)
+            log_msg "[INFO] Setting search domain: $domain"
+            echo "search $domain" >> /etc/resolv.conf
+        fi
+        
+        if [[ "$option" == *"DNS"* ]]; then
+            dns=$(echo "$option" | cut -d" " -f3)
+            log_msg "[INFO] Adding nameserver: $dns"
+            echo "nameserver $dns" >> /etc/resolv.conf
+        fi
+    done
+fi
+
+exit 0
+EOF
+            chmod +x "/etc/openvpn/update-resolv-conf"
+        fi
+    fi
 }
 
 # Verify the WireGuard configuration file's name
@@ -120,7 +181,7 @@ configure_protocol() {
 
     case "${vpn_type}" in
     "openvpn")
-        echo "udp|tcp-client|tcp$"
+        grep -i "proto " "${VPN_CONFIG}" | head -n1 | awk '{print $2}'
         ;;
     "wireguard")
         echo "udp"

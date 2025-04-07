@@ -4,13 +4,14 @@ readonly SLEEP_DELAY='0.5'
 
 start_open_vpn() {
     local vpn_config_path="${1}"
+    local vpn_config_dir=$(dirname "${vpn_config_path}")
+    local vpn_config_file=$(basename "${vpn_config_path}")
 
-    log_info "Starting OpenVPN..."
+    log_info "Starting OpenVPN from directory ${vpn_config_dir}..."
     
-    local config_filename
-    config_filename=$(basename "${vpn_config_path}")
+    cd "${vpn_config_dir}"
     
-    exec openvpn --pull-filter ignore route-ipv6 --pull-filter ignore ifconfig-ipv6 --config "/config/openvpn/${config_filename}" &
+    exec openvpn --pull-filter ignore route-ipv6 --pull-filter ignore ifconfig-ipv6 --config "${vpn_config_file}" &
 }
 
 start_wire_guard() {

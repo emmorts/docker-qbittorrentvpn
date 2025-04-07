@@ -84,7 +84,7 @@ if [ $? -eq 0 ]; then
 	echo "[INFO] An user with PUID $PUID already exists within this container, nothing to do." | ts '%Y-%m-%d %H:%M:%.S'
 else
 	echo "[INFO] An user with PUID $PUID does not exist within this container, adding an user called 'qbittorrent user' with PUID $PUID" | ts '%Y-%m-%d %H:%M:%.S'
-	useradd -c "qbittorrent user" -g $PGID -u $PUID qbittorrent
+	adduser -D -u $PUID -G $PGID qbittorrent
 fi
 
 # Set the umask
