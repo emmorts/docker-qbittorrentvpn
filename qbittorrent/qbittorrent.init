@@ -56,24 +56,39 @@ start_daemon() {
 
     log_message "Starting $DESC..."
     cd /
-    OUTPUT=$($DAEMON $DAEMON_ARGS 2>&1 & echo $!)
-    PID=$!
     
-    # Log the output if there was any
-    if [ -n "$OUTPUT" ]; then
-        log_message "Daemon output: $OUTPUT"
-    fi
+    TEMP_LOG=$(mktemp)
+    
+    $DAEMON $DAEMON_ARGS > "$TEMP_LOG" 2>&1 &
     PID=$!
     echo $PID > "$PIDFILE"
+
+    log_message "Daemon PID: $PID (PID file: $PIDFILE)"
     
-    # Wait briefly to check if process is still running
+    # Wait briefly for startup
     sleep 1
+    
     if kill -0 "$PID" 2>/dev/null; then
+        if [ -s "$TEMP_LOG" ]; then
+            log_message "Daemon output:"
+            cat "$TEMP_LOG" | while read line; do
+                log_message "  $line"
+            done
+        fi
         log_message "Started $DESC successfully (PID: $PID)"
+        
+        cat "$TEMP_LOG" >> "$QBITTORRENTLOGPATH$QBITTORRENTLOG" 2>/dev/null
+        rm -f "$TEMP_LOG"
         return 0
     else
         log_message "Failed to start $DESC"
-        rm -f "$PIDFILE"
+        if [ -s "$TEMP_LOG" ]; then
+            log_message "Daemon error output:"
+            cat "$TEMP_LOG" | while read line; do
+                log_message "  $line"
+            done
+        fi
+        rm -f "$PIDFILE" "$TEMP_LOG"
         return 1
     fi
 }

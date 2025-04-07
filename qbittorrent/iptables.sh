@@ -12,9 +12,15 @@ while : ; do
 done
 
 # identify docker bridge interface name (probably eth0)
-docker_interface=$(netstat -ie | grep -vE "lo|tun|tap|wg" | sed -n '1!p' | grep -P -o -m 1 '^[\w]+')
-if [[ "${DEBUG}" == "true" ]]; then
-	echo "[DEBUG] Docker interface defined as ${docker_interface}" | ts '%Y-%m-%d %H:%M:%.S'
+docker_interface=$(ip -o -4 route show to default | awk '{print $5}' | head -n1)
+if [[ -z "${docker_interface}" ]]; then
+    echo "[ERROR] Failed to detect default network interface, falling back to basic detection" | ts '%Y-%m-%d %H:%M:%.S'
+    docker_interface=$(ip -o link show | grep -v -E 'lo|tun|tap|wg' | head -n1 | awk -F': ' '{print $2}')
+    
+    if [[ -z "${docker_interface}" ]]; then
+        echo "[ERROR] Cannot detect any usable network interface, aborting" | ts '%Y-%m-%d %H:%M:%.S'
+        exit 1
+    fi
 fi
 
 # identify ip for docker bridge interface

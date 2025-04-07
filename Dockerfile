@@ -68,6 +68,8 @@ FROM alpine:latest
 # Install runtime dependencies in a single layer
 RUN apk add --no-cache \
         bash \
+        bc \
+        bind-tools \
         dos2unix \
         findutils \
         grep \
