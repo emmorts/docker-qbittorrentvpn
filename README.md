@@ -1,6 +1,6 @@
 # qBittorrent with VPN
 
-[![1] ![2]](https://github.com/emmorts/docker-qbittorrentvpn/pkgs/container/ghcr-badge)
+[![1] ![2]](https://github.com/emmorts/docker-qbittorrentvpn/pkgs/container/docker-qbittorrentvpn)
 
 [1]: <https://ghcr-badge.egpl.dev/emmorts/docker-qbittorrentvpn/latest_tag?trim=major&label=latest>
 [2]: <https://ghcr-badge.egpl.dev/emmorts/docker-qbittorrentvpn/size>
