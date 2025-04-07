@@ -1,13 +1,35 @@
-# Minimal builder image for compilation
-FROM alpine:latest AS builder
+FROM alpine:3.21 AS builder
 
-# Build arguments with explicit versions for better reproducibility
 ARG QBT_VERSION="5.0.4" \
     BOOST_VERSION_MAJOR="1" \
     BOOST_VERSION_MINOR="86" \
     BOOST_VERSION_PATCH="0" \
     LIBBT_VERSION="RC_1_2" \
     LIBBT_CMAKE_FLAGS=""
+
+LABEL maintainer="emmorts"
+LABEL version="5.0.4"
+LABEL description="qBittorrent with VPN support"
+
+LABEL org.opencontainers.image.title="qBittorrent VPN"
+LABEL org.opencontainers.image.description="A lightweight Docker container running qBittorrent with WireGuard/OpenVPN support"
+LABEL org.opencontainers.image.version="5.0.4.1"
+LABEL org.opencontainers.image.url="https://github.com/emmorts/docker-qbittorrentvpn"
+LABEL org.opencontainers.image.source="https://github.com/emmorts/docker-qbittorrentvpn"
+LABEL org.opencontainers.image.licenses="GPL-3.0"
+LABEL org.opencontainers.image.created="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+LABEL org.opencontainers.image.vendor="emmorts"
+
+LABEL app.qbittorrent.version="5.0.4.1"
+LABEL app.libtorrent.version="${LIBBT_VERSION}"
+LABEL app.boost.version="${BOOST_VERSION_MAJOR}.${BOOST_VERSION_MINOR}.${BOOST_VERSION_PATCH}"
+
+LABEL build.architecture="$(uname -m)"
+LABEL build.date="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+LABEL usage.documentation="https://github.com/emmorts/docker-qbittorrentvpn/blob/master/README.md"
+LABEL usage.webui.port="8080"
+LABEL usage.bittorrent.port="8999"
 
 # Install build dependencies in a single layer
 # Use virtual packages to remove build dependencies later
@@ -24,8 +46,8 @@ RUN apk add --no-cache --virtual .build-deps \
         zlib-dev
 
 # Set compiler and linker options for security and optimization
-ENV CFLAGS="-pipe -fstack-clash-protection -fstack-protector-strong -fno-plt -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3 -D_GLIBCXX_ASSERTIONS" \
-    CXXFLAGS="-pipe -fstack-clash-protection -fstack-protector-strong -fno-plt -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3 -D_GLIBCXX_ASSERTIONS" \
+ENV CFLAGS="-O2 -pipe -fstack-clash-protection -fstack-protector-strong -fno-plt -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3 -D_GLIBCXX_ASSERTIONS" \
+    CXXFLAGS="-O2 -pipe -fstack-clash-protection -fstack-protector-strong -fno-plt -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3 -D_GLIBCXX_ASSERTIONS" \
     LDFLAGS="-gz -Wl,-O1,--as-needed,--sort-common,-z,now,-z,pack-relative-relocs,-z,relro"
 
 # Build boost, libtorrent and qBittorrent in a single layer to reduce image size
@@ -60,10 +82,18 @@ RUN \
     cmake --build build -j$(nproc) && \
     cmake --install build && \
     # Strip binary to reduce size
-    strip /usr/bin/qbittorrent-nox
+    strip /usr/bin/qbittorrent-nox && \
+    # Clean up - remove source code and build files
+    cd / && \
+    rm -rf \
+        /boost \
+        /libtorrent \
+        /qBittorrent-release-* && \
+    # Clean up package cache
+    apk del .build-deps && \
+    rm -rf /var/cache/apk/*
 
-# Create minimal runtime image
-FROM alpine:latest
+FROM alpine:3.21
 
 # Install runtime dependencies in a single layer
 RUN apk add --no-cache \
@@ -88,14 +118,14 @@ RUN apk add --no-cache \
         tzdata \
         unzip \
         wireguard-tools \
-        zip
-
-# Create non-root user
-RUN adduser -D -H -s /sbin/nologin -u 1000 qbtUser && \
-    # Remove src_valid_mark from wg-quick (required for proper WireGuard operation)
-    sed -i /net.ipv4.conf.all.src_valid_mark/d $(which wg-quick) && \
-    mkdir -p /tmp && \
-    chmod 1777 /tmp
+        zip && \
+        # Create non-root user and setup WireGuard in the same layer to reduce image size
+        adduser -D -H -s /sbin/nologin -u 1000 qbtUser && \
+        sed -i /net.ipv4.conf.all.src_valid_mark/d $(which wg-quick) && \
+        mkdir -p /tmp && \
+        chmod 1777 /tmp && \
+        # Remove any package cache that might have been created
+        rm -rf /var/cache/apk/*
 
 # Copy qBittorrent binary
 COPY --from=builder /usr/bin/qbittorrent-nox /usr/bin/qbittorrent-nox
@@ -106,7 +136,11 @@ COPY openvpn/ /etc/openvpn/
 COPY qbittorrent/ /etc/qbittorrent/
 
 # Set execute permissions in a single layer
-RUN chmod +x /etc/qbittorrent/*.sh /etc/qbittorrent/*.init /etc/openvpn/*.sh /etc/scripts/*.sh
+RUN chmod +x /etc/qbittorrent/*.sh /etc/qbittorrent/*.init /etc/openvpn/*.sh /etc/scripts/*.sh && \
+    # Remove any documentation or unnecessary files
+    find /etc -name "*.md" -delete && \
+    find /etc -name "*.txt" -delete && \
+    find /etc -name "README*" -delete
 
 # Create volumes
 VOLUME /config /downloads
