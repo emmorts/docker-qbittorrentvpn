@@ -85,11 +85,11 @@ flowchart TB
             lan["LAN Access Rules"]
         end
         
-        vpn["VPN Tunnel\n(WireGuard/OpenVPN)"]
+        vpn["VPN Tunnel<br />(WireGuard/OpenVPN)"]
     end
     
     internet["Internet"]
-    local["Local Network\n(LAN)"]
+    local["Local Network<br />(LAN)"]
     
     core <--> kill
     webui <--> lan
