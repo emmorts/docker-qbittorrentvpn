@@ -1,16 +1,20 @@
 # qBittorrent with VPN
 
+[![1] ![2]](https://github.com/emmorts/docker-qbittorrentvpn/pkgs/container/ghcr-badge)
+
+[1]: <https://ghcr-badge.egpl.dev/emmorts/docker-qbittorrentvpn/latest_tag?trim=major&label=latest>
+[2]: <https://ghcr-badge.egpl.dev/emmorts/docker-qbittorrentvpn/size>
+
 A lightweight Docker container running [qBittorrent](https://github.com/qbittorrent/qBittorrent) with WireGuard/OpenVPN support and built-in killswitch.
 
 ## Features
 
-- Ultra-lightweight Alpine Linux base (44.42 MB total image size, more than 4x smaller than [DyonR/docker-qbittorrentvpn](https://github.com/DyonR/docker-qbittorrentvpn))
-- Latest qBittorrent v5.0.4 with libtorrent, compiled from source
+- Alpine Linux base (44.42 MB total image size, more than 4x smaller than [DyonR/docker-qbittorrentvpn](https://github.com/DyonR/docker-qbittorrentvpn))
+- Latest qBittorrent v5.0.4 with libtorrent (RC 1.2), compiled from source
 - WireGuard and OpenVPN support with automatic killswitch
 - Comprehensive network isolation and leak protection
 - Detailed health checks and VPN quality monitoring
 - Configurable UID/GID for seamless file permissions
-- Unraid-compatible and ARM64/x86_64 support
 - Optional Python 3 support for scripts and plugins
 
 ## Quick Start
