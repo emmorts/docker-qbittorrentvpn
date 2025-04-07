@@ -4,7 +4,7 @@ NAME="qbittorrent"
 DESC="qBittorrent Daemon"
 PIDFILE="/tmp/$NAME.pid"
 DAEMON="/usr/bin/qbittorrent-nox"
-DAEMON_ARGS="--profile=/config"
+DAEMON_ARGS="--confirm-legal-notice --profile=/config"
 QBITTORRENTLOGPATH="/config/qBittorrent/data/logs/"
 QBITTORRENTLOG="qbittorrent.log"
 
