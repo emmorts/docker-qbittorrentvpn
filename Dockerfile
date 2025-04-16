@@ -1,6 +1,6 @@
 FROM alpine:3.21 AS builder
 
-ARG QBT_VERSION="5.0.4" \
+ARG QBT_VERSION="5.0.5" \
     BOOST_VERSION_MAJOR="1" \
     BOOST_VERSION_MINOR="86" \
     BOOST_VERSION_PATCH="0" \
@@ -13,14 +13,14 @@ LABEL description="qBittorrent with VPN support"
 
 LABEL org.opencontainers.image.title="qBittorrent VPN"
 LABEL org.opencontainers.image.description="A lightweight Docker container running qBittorrent with WireGuard/OpenVPN support"
-LABEL org.opencontainers.image.version="5.0.4.1"
+LABEL org.opencontainers.image.version="5.0.5.0"
 LABEL org.opencontainers.image.url="https://github.com/emmorts/docker-qbittorrentvpn"
 LABEL org.opencontainers.image.source="https://github.com/emmorts/docker-qbittorrentvpn"
 LABEL org.opencontainers.image.licenses="GPL-3.0"
 LABEL org.opencontainers.image.created="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-LABEL org.opencontainers.image.vendor="emmorts"
+LABEL org.opencontainers.image.authors="tomas@stropus.dev"
 
-LABEL app.qbittorrent.version="5.0.4.1"
+LABEL app.qbittorrent.version="5.0.5.0"
 LABEL app.libtorrent.version="${LIBBT_VERSION}"
 LABEL app.boost.version="${BOOST_VERSION_MAJOR}.${BOOST_VERSION_MINOR}.${BOOST_VERSION_PATCH}"
 
@@ -121,6 +121,9 @@ RUN apk add --no-cache \
         zip && \
         # Create non-root user and setup WireGuard in the same layer to reduce image size
         adduser -D -H -s /sbin/nologin -u 1000 qbtUser && \
+        # Remove check for net.ipv4.conf.all.src_valid_mark=1 in wg-quick,
+        # as it can cause issues or is unnecessary within the container's network namespace.
+        # The sysctl option is set via docker run/compose instead.
         sed -i /net.ipv4.conf.all.src_valid_mark/d $(which wg-quick) && \
         mkdir -p /tmp && \
         chmod 1777 /tmp && \

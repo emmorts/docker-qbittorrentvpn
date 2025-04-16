@@ -10,7 +10,7 @@ A lightweight Docker container running [qBittorrent](https://github.com/qbittorr
 ## Features
 
 - Alpine Linux base (44.42 MB total image size, more than 4x smaller than [DyonR/docker-qbittorrentvpn](https://github.com/DyonR/docker-qbittorrentvpn))
-- Latest qBittorrent v5.0.4 with libtorrent (RC 1.2), compiled from source
+- Latest qBittorrent v5.0.5 with libtorrent (RC 1.2), compiled from source
 - WireGuard and OpenVPN support with automatic killswitch
 - Comprehensive network isolation and leak protection
 - Detailed health checks and VPN quality monitoring
@@ -143,7 +143,7 @@ The container runs qBittorrent and routes all torrent traffic through the VPN tu
 #### Network Configuration
 | Variable | Description | Default | Required | Example |
 |----------|-------------|---------|----------|---------|
-| `NAME_SERVERS` | DNS servers to use | `1.1.1.1,1.0.0.1` | No | `8.8.8.8,8.8.4.4` |
+| `NAME_SERVERS` | DNS servers to use | `1.1.1.1,8.8.8.8` | No | `8.8.8.8,8.8.4.4` |
 | `LEGACY_IPTABLES` | Use legacy iptables | `no` | No | `yes` |
 | `ADDITIONAL_PORTS` | Open additional ports | None | No | `9117,8112` |
 
@@ -155,8 +155,8 @@ The container runs qBittorrent and routes all torrent traffic through the VPN tu
 #### File Permissions
 | Variable | Description | Default | Required | Example |
 |----------|-------------|---------|----------|---------|
-| `PUID` | User ID for file ownership | `99` | No | `1000` |
-| `PGID` | Group ID for file ownership | `100` | No | `1000` |
+| `PUID` | User ID for file ownership | `1000` | No | `1001` |
+| `PGID` | Group ID for file ownership | `1000` | No | `1001` |
 | `UMASK` | File permission mask | `002` | No | `022` |
 
 #### Health Checks
