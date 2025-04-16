@@ -9,8 +9,8 @@ A lightweight Docker container running [qBittorrent](https://github.com/qbittorr
 
 ## Features
 
-- Alpine Linux base (44.42 MB total image size, more than 4x smaller than [DyonR/docker-qbittorrentvpn](https://github.com/DyonR/docker-qbittorrentvpn))
-- Latest qBittorrent v5.0.5 with libtorrent (RC 1.2), compiled from source
+- Alpine Linux base (very small image size, see badge above)
+- qBittorrent v5.0.5 with libtorrent (RC 1.2), compiled from source
 - WireGuard and OpenVPN support with automatic killswitch
 - Comprehensive network isolation and leak protection
 - Detailed health checks and VPN quality monitoring
@@ -134,7 +134,7 @@ The container runs qBittorrent and routes all torrent traffic through the VPN tu
 | `VPN_TYPE` | Choose VPN protocol | `openvpn` | Yes (when VPN enabled) | `wireguard` |
 | `LAN_NETWORK` | Your local network(s) in CIDR notation | None | Yes | `192.168.0.0/24,10.0.0.0/16` |
 
-#### VPN Authentication
+#### VPN Configuration
 | Variable | Description | Default | Required | Example |
 |----------|-------------|---------|----------|---------|
 | `VPN_USERNAME` | OpenVPN username | None | No (OpenVPN only) | `myusername` |
@@ -146,6 +146,12 @@ The container runs qBittorrent and routes all torrent traffic through the VPN tu
 | `NAME_SERVERS` | DNS servers to use | `1.1.1.1,8.8.8.8` | No | `8.8.8.8,8.8.4.4` |
 | `LEGACY_IPTABLES` | Use legacy iptables | `no` | No | `yes` |
 | `ADDITIONAL_PORTS` | Open additional ports | None | No | `9117,8112` |
+
+#### WebUI Configuration
+| Variable                                | Description                                      | Default               | Required | Example                                |
+|-----------------------------------------|--------------------------------------------------|-----------------------|----------|----------------------------------------|
+| `QBIT_AUTH_SUBNET_WHITELIST_ENABLED`    | Enable/disable WebUI authentication whitelist    | `true` | No       | `false`                                 |
+| `QBIT_AUTH_SUBNET_WHITELIST`            | Comma-separated list of subnets (CIDR) for WebUI | `10.42.0.0/16` | No       | `192.168.1.0/24,10.0.0.0/8`           |
 
 #### Security Configuration
 | Variable | Description | Default | Required | Example |
@@ -176,6 +182,11 @@ The container runs qBittorrent and routes all torrent traffic through the VPN tu
 |----------|-------------|---------|----------|---------|
 | `INSTALL_PYTHON3` | Install Python 3 | `no` | No | `yes` |
 
+#### Troubleshooting
+| Variable | Description | Default | Required | Example |
+|----------|-------------|---------|----------|---------|
+| `DEBUG` | Enable verbose debug logging in startup scripts | `false` | No | `true` |
+
 For a complete list of environment variables with detailed descriptions, see the [Environment Variables wiki page](https://github.com/emmorts/docker-qbittorrentvpn/wiki/Environment-Variables).
 
 ### Volumes
@@ -189,7 +200,7 @@ For a complete list of environment variables with detailed descriptions, see the
 
 | Port | Protocol | Purpose | Notes |
 |------|----------|---------|-------|
-| `8080` | TCP | WebUI | Secured with SSL by default |
+| `8080` | TCP | WebUI | Secured with HTTPS by default unless `ENABLE_SSL=no` |
 | `8999` | TCP/UDP | BitTorrent | Main port for torrent data transfer |
 
 Additional ports can be exposed using the `ADDITIONAL_PORTS` environment variable.
@@ -302,6 +313,7 @@ If you can't reach the WebUI at https://your-ip:8080:
 1. Make sure you're using HTTPS (unless you set `ENABLE_SSL=no`)
 2. Check that your `LAN_NETWORK` includes your computer's IP subnet
 3. Verify the port mapping in Docker: `docker port qbittorrent`
+4. If you enabled the subnet whitelist (`QBIT_AUTH_SUBNET_WHITELIST_ENABLED=true`), ensure `QBIT_AUTH_SUBNET_WHITELIST` includes the subnet of the computer you are accessing from
 
 ### File Permission Problems
 
@@ -310,20 +322,6 @@ If qBittorrent can't write to your download folder:
 1. Set `PUID` and `PGID` to match your host user: `id $(whoami)`
 2. Check permissions on your host directories
 3. Make sure the /downloads volume is properly mounted
-
-## FAQ
-
-**Q: Does this container work with ARM devices like Raspberry Pi?**  
-A: Yes, the container supports both x86_64 and ARM64 architectures.
-
-**Q: How does the killswitch work?**  
-A: The killswitch uses iptables rules to block all internet traffic except through the VPN tunnel, ensuring no data leaks if the VPN disconnects.
-
-**Q: Can I use this with my NAS?**  
-A: Yes, the container is compatible with most NAS systems that support Docker, including Synology, QNAP, and Unraid.
-
-**Q: Which VPN providers are supported?**  
-A: Any provider that offers standard OpenVPN or WireGuard configurations is supported.
 
 ## Support
 
