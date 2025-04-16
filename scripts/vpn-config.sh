@@ -6,204 +6,442 @@ establish_config_directory() {
     local puid="${2}"
     local pgid="${3}"
 
+    vpn_type=$(echo "${vpn_type}" | tr '[:upper:]' '[:lower:]')
     local -r config_dir="/config/${vpn_type}"
 
+    log_info "Ensuring configuration directory exists: ${config_dir}"
     mkdir -p "${config_dir}"
 
+    log_info "Attempting to set ownership of ${config_dir} to ${puid}:${pgid}"
     if chown -R "${puid}":"${pgid}" "${config_dir}" &>/dev/null; then
-        log_info "Changed ownership of ${config_dir} to ${puid}:${pgid}"
+        log_info "Ownership changed successfully."
     else
-        log_warning "Failed to change the ownership of ${config_dir}. Assuming SMB mount point or lack of permissions."
+        log_warning "Failed to change ownership of ${config_dir}. This might be expected (e.g., SMB mount) or indicate a permissions issue."
     fi
 
+    log_info "Attempting to set permissions of ${config_dir} to 775"
     if chmod -R 775 "${config_dir}" &>/dev/null; then
-        log_info "Changed permissions of ${config_dir} to 775"
+        log_info "Permissions set successfully."
     else
-        log_warning "Failed to change the permissions of ${config_dir}. Assuming SMB mount point or lack of permissions."
+        log_warning "Failed to change permissions of ${config_dir}. This might be expected (e.g., SMB mount) or indicate a permissions issue."
     fi
 }
 
 detect_vpn_configuration_file() {
-    if [[ "${VPN_TYPE}" == "openvpn" ]]; then
-        log_info "Search for OpenVPN config file in /config/openvpn"
-        log_info $(find /config/openvpn -maxdepth 1 \( -name "*.ovpn" -o -name "*.conf" \) ! -name "credentials.conf" -print -quit)
-        # Search for both .ovpn and .conf files for OpenVPN
-        export VPN_CONFIG=$(find /config/openvpn -maxdepth 1 \( -name "*.ovpn" -o -name "*.conf" \) ! -name "credentials.conf" -print -quit)
+    local -r vpn_type_lower=$(echo "${VPN_TYPE}" | tr '[:upper:]' '[:lower:]')
+    local -r search_dir="/config/${vpn_type_lower}"
+    local find_args=()
+
+    log_info "Searching for ${VPN_TYPE} configuration file in ${search_dir}"
+
+    if [[ "${vpn_type_lower}" == "openvpn" ]]; then
+        find_args=(-maxdepth 1 \( -name "*.ovpn" -o -name "*.conf" \) ! -name "credentials.conf" -print -quit)
+        log_info "Looking for first file matching: *.ovpn or *.conf (excluding credentials.conf)"
+    elif [[ "${vpn_type_lower}" == "wireguard" ]]; then
+        find_args=(-maxdepth 1 -name "*.conf" -print -quit)
+        log_info "Looking for first file matching: *.conf"
     else
-        log_info "Search for WireGuard config file in /config/wireguard"
-        log_info $(find /config/wireguard -maxdepth 1 -name "*.conf" -print -quit)
-        export VPN_CONFIG=$(find /config/wireguard -maxdepth 1 -name "*.conf" -print -quit)
+        # should never really happen, as it should have been caught by validate_vpn_type earlier, but defensive check
+        log_error_and_exit "Invalid VPN_TYPE '${VPN_TYPE}' passed to detect_vpn_configuration_file."
     fi
+
+    export VPN_CONFIG=$(find "${search_dir}" "${find_args[@]}" 2>/dev/null || echo "")
 
     if [[ ! -f "${VPN_CONFIG}" ]]; then
-        if [[ "${VPN_TYPE}" == "openvpn" ]]; then
-            log_error_and_exit "No OpenVPN configuration file found in /config/openvpn/. Please download one from your VPN provider and restart this container. Supported file extensions are '.ovpn' and '.conf'"
+        if [[ "${vpn_type_lower}" == "openvpn" ]]; then
+            log_error_and_exit "No OpenVPN configuration file found in ${search_dir}. Please add a .ovpn or .conf file and restart."
         else
-            log_error_and_exit "No WireGuard config file found in /config/wireguard/. Please download one from your VPN provider and restart this container. Make sure the file extension is '.conf'"
+            log_error_and_exit "No WireGuard configuration file found in ${search_dir}. Please add a .conf file (must be named wg0.conf) and restart."
         fi
     else
-        log_info "'${VPN_TYPE}' configuration file found at '${VPN_CONFIG}'"
+        log_info "${VPN_TYPE} configuration file found: '${VPN_CONFIG}'"
 
-        if [[ "${VPN_TYPE}" == "openvpn" ]]; then
+        if [[ "${vpn_type_lower}" == "openvpn" ]]; then
             setup_resolv_conf_script "${VPN_CONFIG}"
+        elif [[ "${vpn_type_lower}" == "wireguard" ]]; then
+            validate_wireguard_config_name "${VPN_CONFIG}"
         fi
     fi
-
-    validate_wireguard_config_name
 }
 
 setup_resolv_conf_script() {
-    local vpn_config="$1"
-    
-    if grep -q "update-resolv-conf" "${vpn_config}"; then
-        log_info "Configuration refers to update-resolv-conf script"
-        
-        if [[ -f "/config/openvpn/update-resolv-conf" ]]; then
-            log_info "Found user-provided update-resolv-conf script, copying to /etc/openvpn/"
-            cp "/config/openvpn/update-resolv-conf" "/etc/openvpn/"
-            chmod +x "/etc/openvpn/update-resolv-conf"
-        else
-            log_warning "update-resolv-conf script not found in /config/openvpn/, creating a basic version"
-            cat > "/etc/openvpn/update-resolv-conf" << 'EOF'
+    local -r vpn_config="$1"
+    local -r user_script_path="/config/openvpn/update-resolv-conf"
+    local -r system_script_path="/etc/openvpn/update-resolv-conf"
+
+    if grep -qE '^\s*(script-security|up|down)\s+.*\bupdate-resolv-conf\b' "${vpn_config}"; then
+        log_info "OpenVPN config references 'update-resolv-conf'."
+
+        if [[ -f "${user_script_path}" ]]; then
+            log_info "Found user-provided update-resolv-conf script at ${user_script_path}. Copying to ${system_script_path}."
+            if cp "${user_script_path}" "${system_script_path}"; then
+                chmod +x "${system_script_path}"
+                log_info "User script copied and made executable."
+            else
+                log_warning "Failed to copy user script ${user_script_path} to ${system_script_path}. Check permissions."
+            fi
+        elif [[ ! -f "${system_script_path}" ]]; then
+            log_warning "'update-resolv-conf' referenced but not found at ${user_script_path}. Creating a basic version at ${system_script_path}."
+            cat >"${system_script_path}" <<'EOF'
 #!/bin/bash
-# Simple script to update resolv.conf for OpenVPN
-# This is version is created automatically
+# Basic update-resolv-conf script automatically generated by docker-qbittorrentvpn container.
+# Handles common 'dhcp-option DNS' and 'dhcp-option DOMAIN' pushed by server.
 
-# Log function
-log_msg() {
-    echo "$1" | ts '%Y-%m-%d %H:%M:%.S'
-}
+# Ensure ts command is available or fallback
+if command -v ts >/dev/null 2>&1; then
+    log_msg() { echo "$(date +'%Y-%m-%d %H:%M:%S') [update-resolv-conf] $1"; }
+else
+    log_msg() { echo "[update-resolv-conf] $1"; }
+fi
 
-log_msg "[INFO] update-resolv-conf script called with args: $*"
+RESOLV_CONF="/etc/resolv.conf"
+MARKER="# Added by OpenVPN update-resolv-conf"
 
-if [[ "$1" == "up" ]]; then
-    for var in "${!foreign_option_*}"; do
-        option="${!var}"
-        
-        if [[ "$option" == *"DOMAIN"* ]]; then
-            domain=$(echo "$option" | cut -d" " -f3)
-            log_msg "[INFO] Setting search domain: $domain"
-            echo "search $domain" >> /etc/resolv.conf
-        fi
-        
-        if [[ "$option" == *"DNS"* ]]; then
-            dns=$(echo "$option" | cut -d" " -f3)
-            log_msg "[INFO] Adding nameserver: $dns"
-            echo "nameserver $dns" >> /etc/resolv.conf
+log_msg "Script called with arguments: $*"
+log_msg "Foreign options available: ${!foreign_option_*}"
+
+# Remove previous entries added by this script on 'down' or 'up'
+if [[ -f "$RESOLV_CONF" ]]; then
+    sed -i".bak_ovpn_ resolv" "/${MARKER}/d" "$RESOLV_CONF"
+fi
+
+if [[ "$script_type" == "up" ]]; then
+    log_msg "Processing 'up' event."
+    SEARCH_DOMAIN=""
+    NAMESERVERS=()
+
+    # Loop through foreign_option variables provided by OpenVPN
+    for varname in ${!foreign_option_*}; do
+        read -r option_num option_value <<< "${!varname}"
+        log_msg "Processing option: ${option_num} = ${option_value}"
+
+        # Example format: foreign_option_1='dhcp-option DOMAIN example.com'
+        # Example format: foreign_option_2='dhcp-option DNS 1.2.3.4'
+        if [[ "$option_value" == "dhcp-option DOMAIN"* ]]; then
+            SEARCH_DOMAIN=$(echo "$option_value" | awk '{print $3}')
+            log_msg "Found search domain: ${SEARCH_DOMAIN}"
+        elif [[ "$option_value" == "dhcp-option DNS"* ]]; then
+            DNS_SERVER=$(echo "$option_value" | awk '{print $3}')
+            log_msg "Found DNS server: ${DNS_SERVER}"
+            NAMESERVERS+=("${DNS_SERVER}")
         fi
     done
+
+    # Append to resolv.conf
+    {
+        if [[ -n "$SEARCH_DOMAIN" ]]; then
+            echo "search ${SEARCH_DOMAIN} ${MARKER}"
+        fi
+        for ns in "${NAMESERVERS[@]}"; do
+            echo "nameserver ${ns} ${MARKER}"
+        done
+    } >> "$RESOLV_CONF"
+
+    log_msg "Updated ${RESOLV_CONF}."
+else
+    log_msg "Processing '${script_type}' event. Cleaned up entries from ${RESOLV_CONF}."
 fi
+
+# Clean up backup file if it exists
+rm -f "${RESOLV_CONF}.bak_ovpn_ resolv"
 
 exit 0
 EOF
-            chmod +x "/etc/openvpn/update-resolv-conf"
+            if chmod +x "${system_script_path}"; then
+                log_info "Basic script created and made executable."
+            else
+                log_warning "Failed to make basic script ${system_script_path} executable."
+            fi
+        else
+            log_info "System script ${system_script_path} already exists (likely built-in). No action needed."
         fi
     fi
 }
 
 # Verify the WireGuard configuration file's name
 validate_wireguard_config_name() {
-    if [[ "${VPN_TYPE}" == "wireguard" && "${VPN_CONFIG}" != "/config/wireguard/wg0.conf" ]]; then
-        log_error_and_exit "WireGuard configuration file name must be 'wg0.conf'. Rename ${VPN_CONFIG} to '/config/wireguard/wg0.conf'."
-    fi
-}
+    local -r vpn_config_path="${1}"
+    local -r expected_filename="wg0.conf"
+    local -r actual_filename=$(basename "${vpn_config_path}")
 
-# Create an OpenVPN configuration file with credentials
-add_credentials_to_openvpn_config() {
-    local vpn_type="$1"
-    local vpn_config="$2"
-    local vpn_username="$3"
-    local vpn_password="$4"
-
-    if [[ "${vpn_type,,}" == "openvpn" && -n "${vpn_username}" && -n "${vpn_password}" ]]; then
-        local credentials_path="/config/openvpn/credentials.conf"
-        echo -e "${vpn_username}\n${vpn_password}" >"${credentials_path}"
-        if grep -q -F 'auth-user-pass' "${vpn_config}"; then
-            sed -i "/auth-user-pass/c\auth-user-pass ${credentials_path}" "${vpn_config}"
+    if [[ "${VPN_TYPE,,}" == "wireguard" ]]; then
+        if [[ "${actual_filename}" != "${expected_filename}" ]]; then
+            log_error_and_exit "WireGuard configuration file must be named '${expected_filename}'. Found '${actual_filename}' at '${vpn_config_path}'. Please rename the file and restart."
         else
-            echo -e "auth-user-pass ${credentials_path}\n$(cat ${vpn_config})" >"${vpn_config}"
+            log_info "WireGuard configuration filename '${actual_filename}' is correct."
         fi
     fi
 }
 
-extract_vpn_remote_address() {
-    local vpn_type="${1,,}"
-    local vpn_config="${2}"
+# Modify OpenVPN config to use credentials file if VPN_USERNAME/PASSWORD are set
+add_credentials_to_openvpn_config() {
+    local -r vpn_type="$1"
+    local -r vpn_config="$2"
+    local -r vpn_username="$3"
+    local -r vpn_password="$4"
+
+    if [[ "${vpn_type,,}" != "openvpn" || -z "${vpn_username}" || -z "${vpn_password}" ]]; then
+        if [[ "${vpn_type,,}" == "openvpn" && (-n "${vpn_username}" || -n "${vpn_password}") ]]; then
+             log_warning "Both VPN_USERNAME and VPN_PASSWORD must be set to configure credentials automatically. Skipping."
+        fi
+        return 0
+    fi
+
+    log_info "VPN_USERNAME and VPN_PASSWORD are set. Configuring OpenVPN credentials..."
+    local -r credentials_filename="credentials.conf"
+    local -r auth_line_target="auth-user-pass ${credentials_filename}"
+    local -r credentials_path="/config/openvpn/${credentials_filename}"
+    local -r vpn_config_dir=$(dirname "${vpn_config}")
+    local -r vpn_config_tmp="${vpn_config}.processed.tmp"
+
+    # 1. Create the credentials file
+    log_info "Creating credentials file at ${credentials_path}"
+    if printf "%s\n%s\n" "${vpn_username}" "${vpn_password}" > "${credentials_path}"; then
+        chmod 600 "${credentials_path}"
+        chown "${PUID}":"${PGID}" "${credentials_path}" &>/dev/null || \
+            log_warning "Could not set ownership on credentials file ${credentials_path}."
+        log_info "Credentials file created successfully."
+    else
+        log_warning "Failed to create credentials file at ${credentials_path}. Check permissions. Cannot proceed with auto-auth."
+        rm -f "${vpn_config_tmp}"
+        return 1
+    fi
+
+    # 2. Check if the config *already* contains the exact target line. If so, we're done.
+    if grep -qEx "[[:space:]]*${auth_line_target}[[:space:]]*" "${vpn_config}"; then
+        log_info "OpenVPN config already contains the correct '${auth_line_target}' directive. No changes needed."
+        rm -f "${vpn_config_tmp}"
+        return 0
+    fi
+
+    # 3. Process the original config file line-by-line
+    log_info "Processing ${vpn_config} line-by-line to ensure correct auth directive..."
+    local found_existing_auth_line=0 # flag: 0=not found, 1=found and replaced
+    local line_written=0 # flag to track if any line was written (detects empty output)
+
+    # use a temporary file descriptor for writing to avoid subshell issues with flags
+    exec 3> "${vpn_config_tmp}" || { log_warning "Failed to open temporary file ${vpn_config_tmp} for writing."; rm -f "${vpn_config_tmp}"; return 1; }
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line_written=1
+        if echo "$line" | grep -qE '^[#;[:space:]]*auth-user-pass'; then
+            if [[ ${found_existing_auth_line} -eq 0 ]]; then
+                log_info "Replacing line: '${line}' with '${auth_line_target}'"
+                printf "%s\n" "${auth_line_target}" >&3
+                found_existing_auth_line=1
+            else
+                # this is a subsequent match, let's remove it
+                log_info "Removing subsequent auth line: '${line}'"
+                # or maybe comment it out? any reaon for it though?
+                # printf "# %s # (Disabled by docker-qbittorrentvpn)\n" "$line" >&3
+            fi
+        else
+            printf "%s\n" "$line" >&3
+        fi
+    done < "${vpn_config}"
+
+    # close the temporary file descriptor
+    exec 3>&-
+
+    if [[ ${line_written} -eq 0 ]] && [[ ! -s "${vpn_config_tmp}" ]]; then
+         log_warning "Input file ${vpn_config} seems empty or could not be read. Aborting modification."
+         rm -f "${vpn_config_tmp}"
+         return 1
+    fi
+
+    # 4. If no existing auth line was found during the loop, prepend the target line
+    if [[ ${found_existing_auth_line} -eq 0 ]]; then
+        log_info "No existing auth-user-pass line found. Prepending the directive."
+        local final_tmp="${vpn_config}.final.tmp"
+        if { printf "%s\n" "${auth_line_target}"; cat "${vpn_config_tmp}"; } > "${final_tmp}"; then
+             if ! mv "${final_tmp}" "${vpn_config_tmp}"; then
+                 log_warning "Failed to move final temp file. Aborting."
+                 rm -f "${vpn_config_tmp}" "${final_tmp}"
+                 return 1
+             fi
+             log_info "Successfully prepended auth directive."
+        else
+            log_warning "Failed to prepend auth directive using temp files. Aborting."
+            rm -f "${vpn_config_tmp}" "${final_tmp}"
+            return 1
+        fi
+    fi
+
+    # 5. Final Verification 
+    log_info "Verifying final temporary file (${vpn_config_tmp})..."
+    if grep -qFx "${auth_line_target}" "${vpn_config_tmp}"; then
+        # count occurrences - should be exactly 1
+        local auth_count
+        auth_count=$(grep -cEx "[[:space:]]*${auth_line_target}[[:space:]]*" "${vpn_config_tmp}")
+        if [[ ${auth_count} -eq 1 ]]; then
+             log_info "Verification successful: Found exactly one correct auth line."
+        else
+            log_warning "Verification failed: Found ${auth_count} instances of the target auth line (expected 1). Aborting."
+            # log temp file content for debugging...
+             if [[ -s "${vpn_config_tmp}" ]]; then
+                log_warning "Content of temp file (${vpn_config_tmp}):"; head -n 20 "${vpn_config_tmp}" | while IFS= read -r line; do log_warning "  | ${line}"; done; [[ $(wc -l < "${vpn_config_tmp}") -gt 20 ]] && log_warning "  | ... (file truncated)";
+             fi
+            rm -f "${vpn_config_tmp}"
+            return 1
+        fi
+    else
+        log_warning "Verification failed: Did not find the target auth line '${auth_line_target}' in the final temp file. Aborting."
+         # log temp file content for debugging...
+         if [[ -s "${vpn_config_tmp}" ]]; then
+            log_warning "Content of temp file (${vpn_config_tmp}):"; head -n 20 "${vpn_config_tmp}" | while IFS= read -r line; do log_warning "  | ${line}"; done; [[ $(wc -l < "${vpn_config_tmp}") -gt 20 ]] && log_warning "  | ... (file truncated)";
+         fi
+        rm -f "${vpn_config_tmp}"
+        return 1
+    fi
+
+    # 6. Replace original file with the verified temporary file
+    log_info "Replacing original file ${vpn_config} with processed version."
+    if mv "${vpn_config_tmp}" "${vpn_config}"; then
+        log_info "Successfully updated ${vpn_config}."
+    else
+        log_warning "Failed to move verified temp file ${vpn_config_tmp} to ${vpn_config}. Modification failed."
+        # todo: attempt to restore from backup?
+        rm -f "${vpn_config_tmp}"
+        return 1
+    fi
+
+    # 7. Set ownership/permissions (same as before)
+    if [[ -f "${credentials_path}" ]]; then
+        chown --reference="${credentials_path}" "${vpn_config}" &>/dev/null
+        chmod --reference="${credentials_path}" "${vpn_config}" &>/dev/null
+    else
+        chown "${PUID}":"${PGID}" "${vpn_config}" &>/dev/null
+    fi
+
+    log_info "OpenVPN configuration update process complete."
+    return 0
+}
+
+extract_vpn_remote_address_line() {
+    local -r vpn_type="${1,,}"
+    local -r vpn_config="${2}"
 
     validate_vpn_type "${vpn_type}"
 
     case "${vpn_type}" in
     "openvpn")
-        grep -P -o -m 1 '(?<=^remote\s)[^\n\r]+' "${vpn_config}"
+        # Strategy: Find the first non-commented line starting with 'remote '
+        # Then use sed to remove the 'remote ' prefix and leading whitespace.
+        grep -E -m 1 '^[[:space:]]*remote[[:space:]]+[^\n\r]+' "${vpn_config}" | sed -E 's/^[[:space:]]*remote[[:space:]]+//'
         ;;
     "wireguard")
-        grep -P -o -m 1 '(?<=^Endpoint)(\s{0,})[^\n\r]+' "${vpn_config}" | sed -e 's~^[=\ ]*~~'
+        # Strategy: Find the first non-commented line starting with 'Endpoint = '
+        # Then use sed to remove the 'Endpoint = ' prefix and leading/trailing whitespace from the result.
+        grep -E -m 1 '^[[:space:]]*Endpoint[[:space:]]*=[^\n\r]+' "${vpn_config}" | sed -E 's/^[[:space:]]*Endpoint[[:space:]]*=//; s/^[[:space:]]*//; s/[[:space:]]*$//'
+        ;;
+    *)
+        log_warning "Unknown VPN type '${vpn_type}' in extract_vpn_remote_address_line."
+        echo "" # Return empty on unknown type
         ;;
     esac
 }
 
 configure_remote() {
-    local vpn_type="${1}"
-    local vpn_remote_line="${2}"
+    local -r vpn_type="${1,,}"
+    local -r vpn_remote_line="${2}"
 
     validate_vpn_type "${vpn_type}"
 
     case "${vpn_type}" in
     "openvpn")
+        # Regex: From the remote line, extract the first sequence of non-whitespace characters (the host/IP).
+        # Trim leading/trailing whitespace just in case.
         echo "${vpn_remote_line}" | grep -P -o -m 1 '^[^\s\r\n]+' | sed -e 's~^[ \t]*~~;s~[ \t]*$~~'
         ;;
     "wireguard")
-        echo "${vpn_remote_line}" | grep -P -o -m 1 '^[^:\r\n]+'
+        # Regex: From the endpoint line (host:port), extract everything before the last colon.
+        # Handles IPv6 addresses containing colons.
+        echo "${vpn_remote_line}" | grep -P -o -m 1 '^.+?(?=:[^:]*$)'
+        ;;
+    *)
+        log_warning "Unknown VPN type '${vpn_type}' in configure_remote."
+        echo ""
         ;;
     esac
 }
 
 configure_port() {
-    local vpn_type="${1}"
-    local vpn_remote_line="${2}"
+    local -r vpn_type="${1,,}"
+    local -r vpn_remote_line="${2}"
 
     validate_vpn_type "${vpn_type}"
 
     case "${vpn_type}" in
     "openvpn")
-        echo "${vpn_remote_line}" | grep -P -o -m 1 '(?<=\s)\d{2,5}(?=\s)?+' | sed -e 's~^[ \t]*~~;s~[ \t]*$~~'
+        # Regex: Extract the first sequence of 2 to 5 digits found after whitespace on the remote line.
+        # Trim leading/trailing whitespace just in case.
+        echo "${vpn_remote_line}" | grep -P -o -m 1 '(?<=\s)\d{2,5}(?=(\s|$))?' | sed -e 's~^[ \t]*~~;s~[ \t]*$~~'
         ;;
     "wireguard")
-        echo "${vpn_remote_line}" | grep -P -o -m 1 '(?<=:)\d{2,5}(?=:)?+'
+        # Regex: Extract the sequence of 2 to 5 digits after the last colon on the endpoint line.
+        echo "${vpn_remote_line}" | grep -P -o -m 1 '(?<=:)\d{2,5}$'
+        ;;
+    *)
+        log_warning "Unknown VPN type '${vpn_type}' in configure_port."
+        echo ""
         ;;
     esac
 }
 
 configure_protocol() {
-    local vpn_type="${1}"
+    local -r vpn_type="${1,,}"
+    local -r vpn_config="${2}"
 
     validate_vpn_type "${vpn_type}"
 
     case "${vpn_type}" in
     "openvpn")
-        grep -i "proto " "${VPN_CONFIG}" | head -n1 | awk '{print $2}'
+        # Find the first non-commented 'proto' line and extract the second field (udp/tcp). Case-insensitive search.
+        # Defaults to 'udp' if not found (OpenVPN default).
+        local proto
+        proto=$(grep -i -m 1 '^[[:space:]]*proto[[:space:]]' "${vpn_config}" | awk '{print tolower($2)}')
+        echo "${proto:-udp}"
         ;;
     "wireguard")
+        # WireGuard always uses UDP.
         echo "udp"
+        ;;
+    *)
+        log_warning "Unknown VPN type '${vpn_type}' in configure_protocol."
+        echo ""
         ;;
     esac
 }
 
 configure_device_type() {
-    local vpn_type="${1}"
-    local vpn_config="${2}"
+    local -r vpn_type="${1,,}"
+    local -r vpn_config="${2}"
 
     validate_vpn_type "${vpn_type}"
 
     case "${vpn_type}" in
     "openvpn")
-        local device_type=$(cat "${vpn_config}" | grep -P -o -m 1 '(?<=^dev\s)[^\r\n\d]+' | sed -e 's~^[ \t]*~~;s~[ \t]*$~~')
-        if [[ ! -z "${device_type}" ]]; then
-            echo "${device_type}0"
+        # Find the first non-commented 'dev' line, extract the device base name (e.g., 'tun', 'tap').
+        # Append '0' to it. Handles 'dev tun' or 'dev tap'.
+        # Trim whitespace.
+        local device_base
+        device_base=$(grep -i -m 1 '^[[:space:]]*dev[[:space:]]' "${vpn_config}" | awk '{print $2}' | sed -e 's~^[ \t]*~~;s~[ \t]*$~~' | tr -d '[:digit:]')
+        if [[ -n "${device_base}" ]]; then
+            echo "${device_base}0" # Append 0, e.g., tun0, tap0
+        else
+            # Default if 'dev' directive is missing (OpenVPN defaults usually to tun)
+            log_warning "Could not determine device type from OpenVPN config, defaulting to 'tun0'."
+            echo "tun0"
         fi
         ;;
     "wireguard")
+        # WireGuard device name is derived from the config filename (wg0.conf -> wg0).
+        # Since we enforce wg0.conf, the device is always wg0.
         echo "wg0"
+        ;;
+    *)
+        log_warning "Unknown VPN type '${vpn_type}' in configure_device_type."
+        echo ""
         ;;
     esac
 }
