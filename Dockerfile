@@ -135,11 +135,10 @@ COPY --from=builder /usr/bin/qbittorrent-nox /usr/bin/qbittorrent-nox
 
 # Copy configuration scripts
 COPY scripts/ /etc/scripts/
-COPY openvpn/ /etc/openvpn/
 COPY qbittorrent/ /etc/qbittorrent/
 
 # Set execute permissions in a single layer
-RUN chmod +x /etc/qbittorrent/*.sh /etc/qbittorrent/*.init /etc/openvpn/*.sh /etc/scripts/*.sh && \
+RUN chmod +x /etc/qbittorrent/*.sh /etc/qbittorrent/*.init /etc/scripts/*.sh && \
     # Remove any documentation or unnecessary files
     find /etc -name "*.md" -delete && \
     find /etc -name "*.txt" -delete && \
