@@ -1,6 +1,6 @@
 FROM alpine:3.21 AS builder
 
-ARG QBT_VERSION="5.0.5" \
+ARG QBT_VERSION="5.1.0" \
     BOOST_VERSION_MAJOR="1" \
     BOOST_VERSION_MINOR="86" \
     BOOST_VERSION_PATCH="0" \
@@ -13,14 +13,14 @@ LABEL description="qBittorrent with VPN support"
 
 LABEL org.opencontainers.image.title="qBittorrent VPN"
 LABEL org.opencontainers.image.description="A lightweight Docker container running qBittorrent with WireGuard/OpenVPN support"
-LABEL org.opencontainers.image.version="5.0.5.0"
+LABEL org.opencontainers.image.version="5.1.0.0"
 LABEL org.opencontainers.image.url="https://github.com/emmorts/docker-qbittorrentvpn"
 LABEL org.opencontainers.image.source="https://github.com/emmorts/docker-qbittorrentvpn"
 LABEL org.opencontainers.image.licenses="GPL-3.0"
 LABEL org.opencontainers.image.created="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 LABEL org.opencontainers.image.authors="tomas@stropus.dev"
 
-LABEL app.qbittorrent.version="5.0.5.0"
+LABEL app.qbittorrent.version="5.1.0.0"
 LABEL app.libtorrent.version="${LIBBT_VERSION}"
 LABEL app.boost.version="${BOOST_VERSION_MAJOR}.${BOOST_VERSION_MINOR}.${BOOST_VERSION_PATCH}"
 

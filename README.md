@@ -10,7 +10,7 @@ A lightweight Docker container running [qBittorrent](https://github.com/qbittorr
 ## Features
 
 - Alpine Linux base (very small image size, see badge above)
-- qBittorrent v5.0.5 with libtorrent (RC 1.2), compiled from source
+- qBittorrent v5.1.0 with libtorrent (RC 1.2), compiled from source
 - **WireGuard** and **OpenVPN** support
 - iptables with a default `DROP` policy, ensuring qBittorrent traffic *only* goes through the VPN tunnel. LAN access to the WebUI remains allowed even if the VPN is down.
 - Configures routing and firewall rules to prevent IP leaks. Includes DNS handling via `update-resolv-conf` for OpenVPN.
