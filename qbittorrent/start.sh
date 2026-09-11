@@ -220,9 +220,9 @@ check_vpn_health() {
         fi
 
         local external_ip
-        external_ip=$(curl --interface ${VPN_DEVICE_TYPE} --silent --max-time 5 "https://api.ipify.org" ||
-            curl --interface ${VPN_DEVICE_TYPE} --silent --max-time 5 "https://ifconfig.me" ||
-            curl --interface ${VPN_DEVICE_TYPE} --silent --max-time 5 "https://icanhazip.com" ||
+        external_ip=$(curl --interface ${VPN_DEVICE_TYPE} --silent --max-time 8 "https://api.ipify.org" ||
+            curl --interface ${VPN_DEVICE_TYPE} --silent --max-time 8 "https://ifconfig.me" ||
+            curl --interface ${VPN_DEVICE_TYPE} --silent --max-time 8 "https://icanhazip.com" ||
             echo "")
 
         if [[ -z "${external_ip}" ]]; then
@@ -410,7 +410,7 @@ measure_vpn_quality() {
         # Get current external IP through VPN
         local current_ip=""
         for ip_service in "https://api.ipify.org" "https://ifconfig.me" "https://icanhazip.com"; do
-            current_ip=$(curl --interface "${VPN_DEVICE_TYPE}" --silent --max-time 5 "${ip_service}" 2>/dev/null || echo "")
+            current_ip=$(curl --interface "${VPN_DEVICE_TYPE}" --silent --max-time 8 "${ip_service}" 2>/dev/null || echo "")
             if [[ -n "${current_ip}" ]]; then
                 break
             fi
@@ -622,14 +622,29 @@ if [ -e /proc/$qbittorrentpid ]; then
     fi
     echo "[INFO] HEALTH_CHECK_AMOUNT is set to ${HEALTH_CHECK_AMOUNT}" | ts '%Y-%m-%d %H:%M:%.S'
 
+    # Consecutive failed health-check rounds tolerated before restarting the
+    # container. Killing qBittorrent is a blunt recovery: the kill-switch is
+    # iptables-based (OUTPUT DROP), so a dead tunnel cannot leak while we wait,
+    # and a transient DNS hiccup or dropped WireGuard handshake usually recovers
+    # on its own within a round or two. Override with VPN_HEALTH_GRACE_ROUNDS=1
+    # to restore the old restart-on-first-failure behaviour.
+    VPN_HEALTH_FAILURES=0
+    VPN_HEALTH_GRACE_ROUNDS=${VPN_HEALTH_GRACE_ROUNDS:-2}
+
     while true; do
         if ! check_vpn_health; then
-            echo "[ERROR] VPN health check failed." | ts '%Y-%m-%d %H:%M:%.S'
-            sleep 1
-            if [[ ${RESTART_CONTAINER,,} == "1" || ${RESTART_CONTAINER,,} == "true" || ${RESTART_CONTAINER,,} == "yes" ]]; then
-                echo "[INFO] Restarting container." | ts '%Y-%m-%d %H:%M:%.S'
-                exit 1
+            VPN_HEALTH_FAILURES=$((VPN_HEALTH_FAILURES + 1))
+            echo "[ERROR] VPN health check failed (${VPN_HEALTH_FAILURES}/${VPN_HEALTH_GRACE_ROUNDS})." | ts '%Y-%m-%d %H:%M:%.S'
+            if [[ ${VPN_HEALTH_FAILURES} -ge ${VPN_HEALTH_GRACE_ROUNDS} ]]; then
+                sleep 1
+                if [[ ${RESTART_CONTAINER,,} == "1" || ${RESTART_CONTAINER,,} == "true" || ${RESTART_CONTAINER,,} == "yes" ]]; then
+                    echo "[INFO] Restarting container." | ts '%Y-%m-%d %H:%M:%.S'
+                    exit 1
+                fi
             fi
+        elif [[ ${VPN_HEALTH_FAILURES} -gt 0 ]]; then
+            echo "[INFO] VPN health check recovered after ${VPN_HEALTH_FAILURES} failed round(s); not restarting." | ts '%Y-%m-%d %H:%M:%.S'
+            VPN_HEALTH_FAILURES=0
         fi
 
         if [[ ${HEALTH_CHECK_SILENT,,} == "0" || ${HEALTH_CHECK_SILENT,,} == "false" || ${HEALTH_CHECK_SILENT,,} == "no" ]]; then
